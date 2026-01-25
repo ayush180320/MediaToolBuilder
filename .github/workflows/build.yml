@@ -18,9 +18,10 @@ jobs:
       run: |
         pip install customtkinter Pillow psd-tools pyinstaller
 
-    - name: Build EXE
+    - name: Build EXE with Embedded Resources
       run: |
-        pyinstaller --noconfirm --onefile --windowed --name "ProMediaTool" "media_tool.py"
+        # The syntax is "source_file;destination_folder"
+        pyinstaller --noconfirm --onefile --windowed --name "ProMediaTool" --add-data "banner_2day.png;." --add-data "banner_3day.png;." "media_tool.py"
 
     - name: Upload EXE
       uses: actions/upload-artifact@v4
