@@ -1,10 +1,10 @@
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageFilter # Added ImageFilter
 from psd_tools import PSDImage
 import os
 import threading
-import sys  # Added sys for internal path handling
+import sys
 
 # --- Configuration & Theme ---
 ctk.set_appearance_mode("Dark")
@@ -14,7 +14,7 @@ class ProMediaTool(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Media Workflow Studio Pro (Standalone)")
+        self.title("Media Workflow Studio Pro (HD Edition)")
         self.geometry("950x650")
         
         # --- Layout ---
@@ -31,7 +31,7 @@ class ProMediaTool(ctk.CTk):
 
         self.tab_psd = self.tab_view.add("PSD Bulk Converter")
         self.tab_resize = self.tab_view.add("Smart Resizer")
-        self.tab_banner = self.tab_view.add("Banner & Rename")
+        self.tab_banner = self.tab_view.add("HD Banner & Rename")
 
         # RIGHT SIDE: Preview & Logs
         self.right_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="#1a1a1a")
@@ -45,7 +45,7 @@ class ProMediaTool(ctk.CTk):
 
         self.log_box = ctk.CTkTextbox(self.right_frame, height=150)
         self.log_box.pack(fill="x", padx=10, pady=10, side="bottom")
-        self.log("System Ready. Templates Embedded.")
+        self.log("System Ready. HD Sharpening Active.")
 
         self.file_list = [] 
 
@@ -57,7 +57,6 @@ class ProMediaTool(ctk.CTk):
     def resource_path(self, relative_path):
         """ Get absolute path to resource, works for dev and for PyInstaller """
         try:
-            # PyInstaller creates a temp folder and stores path in _MEIPASS
             base_path = sys._MEIPASS
         except Exception:
             base_path = os.path.abspath(".")
@@ -95,7 +94,15 @@ class ProMediaTool(ctk.CTk):
     def save_image_pro(self, img_obj, output_path, original_dpi=(72, 72)):
         if img_obj.mode in ("RGBA", "P", "CMYK"):
             img_obj = img_obj.convert("RGB")
-        img_obj.save(output_path, "JPEG", quality=100, subsampling=0, dpi=original_dpi)
+        
+        # Save with maximum possible JPG fidelity
+        img_obj.save(
+            output_path, 
+            "JPEG", 
+            quality=100,       # Max compression quality
+            subsampling=0,     # 4:4:4 (Prevents color bleeding on text)
+            dpi=original_dpi
+        )
 
     def select_files(self, listbox_widget, mode):
         filetypes = [("Photoshop", "*.psd")] if mode == "psd" else [("Images", "*.jpg;*.png;*.jpeg")]
@@ -140,6 +147,10 @@ class ProMediaTool(ctk.CTk):
                 img = Image.open(f)
                 dpi = img.info.get('dpi', (72, 72))
                 img = img.resize((w, h), Image.Resampling.LANCZOS)
+                
+                # Apply mild sharpening to resized images to keep them crisp
+                img = img.filter(ImageFilter.UnsharpMask(radius=0.6, percent=100, threshold=3))
+                
                 out = os.path.splitext(f)[0] + f"_{self.res_var.get()}.jpg"
                 self.save_image_pro(img, out, dpi)
                 self.log(f"Resized: {os.path.basename(out)}")
@@ -147,7 +158,7 @@ class ProMediaTool(ctk.CTk):
         messagebox.showinfo("Done", "Batch Complete")
 
     def _setup_banner_tab(self):
-        ctk.CTkLabel(self.tab_banner, text="Banner Application (Embedded)", font=("Arial", 14, "bold")).pack(pady=10)
+        ctk.CTkLabel(self.tab_banner, text="HD Banner Application (Embedded)", font=("Arial", 14, "bold")).pack(pady=10)
         ctk.CTkButton(self.tab_banner, text="Select Files", command=lambda: self.select_files(self.txt_ban, "img")).pack(pady=5)
         self.txt_ban = ctk.CTkTextbox(self.tab_banner, height=80, state="disabled")
         self.txt_ban.pack(pady=5, fill="x", padx=10)
@@ -168,7 +179,6 @@ class ProMediaTool(ctk.CTk):
 
     def _process_ban(self):
         art_w, art_h, final_w, final_h = 286, 371, 286, 410
-        # CRITICAL: Use resource_path to find the internal image
         tpl_name = "banner_2day.png" if self.ban_type.get() == "2day" else "banner_3day.png"
         tpl_path = self.resource_path(tpl_name)
 
@@ -182,7 +192,13 @@ class ProMediaTool(ctk.CTk):
             try:
                 img = Image.open(fpath)
                 dpi = img.info.get('dpi', (72, 72))
+                
+                # 1. Resize with High Quality Filter
                 img_res = img.resize((art_w, art_h), Image.Resampling.LANCZOS)
+                
+                # 2. NEW: Smart Sharpening (Unsharp Mask)
+                # This makes the small image look crisp, like a Retina display
+                img_res = img_res.filter(ImageFilter.UnsharpMask(radius=0.8, percent=110, threshold=3))
                 
                 canvas = Image.new("RGB", (final_w, final_h), (255, 255, 255))
                 canvas.paste(img_res, (0, 0))
@@ -190,8 +206,11 @@ class ProMediaTool(ctk.CTk):
                 banner = Image.open(tpl_path).convert("RGBA")
                 if banner.size != (final_w, final_h):
                     banner = banner.resize((final_w, final_h), Image.Resampling.LANCZOS)
+                
+                # Composite
                 canvas.paste(banner, (0, 0), mask=banner)
 
+                # Rename
                 suffix = "2DayBanner_286x410" if self.ban_type.get() == "2day" else "3DayBanner_286x410"
                 if user_title:
                     fname = f"{user_title}_{i+1:02d}_{suffix}.jpg" if len(self.file_list) > 1 else f"{user_title}_{suffix}.jpg"
@@ -199,9 +218,9 @@ class ProMediaTool(ctk.CTk):
                     fname = os.path.splitext(os.path.basename(fpath))[0] + f"_{suffix}.jpg"
 
                 self.save_image_pro(canvas, os.path.join(os.path.dirname(fpath), fname), dpi)
-                self.log(f"Created: {fname}")
+                self.log(f"Created (HD): {fname}")
             except Exception as e: self.log(f"Error: {e}")
-        messagebox.showinfo("Success", "Banner Batch Completed")
+        messagebox.showinfo("Success", "HD Banners Created")
 
 if __name__ == "__main__":
     app = ProMediaTool()
