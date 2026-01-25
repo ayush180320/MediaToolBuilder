@@ -14,8 +14,21 @@ class ProMediaTool(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Media Workflow Studio Pro (HD Edition)")
+        self.title("Media Workflow Studio Pro")
         self.geometry("950x650")
+        class ProMediaTool(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+
+        self.title("Media Workflow Studio Pro")
+        self.geometry("950x650")
+
+        # --- HIDDEN SIGNATURE (EASTER EGG) ---
+        # This binds the keys "Control + Alt + A" to run the secret function
+        self.bind("<Control-Alt-a>", self._reveal_author)
+        
+        # Define internal authorship variable (visible if code is audited/decompiled)
+        self._author_signature = "Original Code by Ayush Singhal - 2025"
         
         # --- Layout ---
         self.grid_columnconfigure(0, weight=3)
@@ -31,7 +44,7 @@ class ProMediaTool(ctk.CTk):
 
         self.tab_psd = self.tab_view.add("PSD Bulk Converter")
         self.tab_resize = self.tab_view.add("Smart Resizer")
-        self.tab_banner = self.tab_view.add("HD Banner & Rename")
+        self.tab_banner = self.tab_view.add("Banner & Rename")
 
         # RIGHT SIDE: Preview & Logs
         self.right_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="#1a1a1a")
@@ -158,7 +171,7 @@ class ProMediaTool(ctk.CTk):
         messagebox.showinfo("Done", "Batch Complete")
 
     def _setup_banner_tab(self):
-        ctk.CTkLabel(self.tab_banner, text="HD Banner Application (Embedded)", font=("Arial", 14, "bold")).pack(pady=10)
+        ctk.CTkLabel(self.tab_banner, text="Banner Application (Embedded)", font=("Arial", 14, "bold")).pack(pady=10)
         ctk.CTkButton(self.tab_banner, text="Select Files", command=lambda: self.select_files(self.txt_ban, "img")).pack(pady=5)
         self.txt_ban = ctk.CTkTextbox(self.tab_banner, height=80, state="disabled")
         self.txt_ban.pack(pady=5, fill="x", padx=10)
@@ -220,8 +233,22 @@ class ProMediaTool(ctk.CTk):
                 self.save_image_pro(canvas, os.path.join(os.path.dirname(fpath), fname), dpi)
                 self.log(f"Created (HD): {fname}")
             except Exception as e: self.log(f"Error: {e}")
-        messagebox.showinfo("Success", "HD Banners Created")
-
+        messagebox.showinfo("Success", "Banners Created")
+# --- HIDDEN AUTHOR FUNCTION ---
+    def _reveal_author(self, event=None):
+        """ 
+        This popup only appears if you press Ctrl+Alt+A.
+        Regular users will never see this.
+        """
+        messagebox.showinfo(
+            "Developer Signature",
+            "MEDIA WORKFLOW STUDIO PRO\n"
+            "---------------------------\n"
+            "Core Architecture & Code by:\n"
+            "Ayush Singhal\n\n"
+            "Built internally for Deluxe Media\n"
+            "Date: 2025"
+        )
 if __name__ == "__main__":
     app = ProMediaTool()
     app.mainloop()
