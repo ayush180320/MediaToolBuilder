@@ -1,6 +1,25 @@
+"""
+APPLICATION SECURITY MANIFEST & AUDIT LOG
+-----------------------------------------
+App Name:       Media Workflow Studio Pro
+Version:        2.1 (GitHub Release)
+Author:         Ayush Singhal
+Company:        Deluxe Media
+Created:        2025
+Purpose:        Local image manipulation (Resizing, PSD Conversion, Formatting).
+
+SECURITY SCOPE:
+  1. NETWORK:   BLOCKED. No network libraries are used. Works 100% Offline.
+  2. FILESYSTEM: RESTRICTED. Only reads/writes in user-selected directories.
+  3. TELEMETRY: NONE. No data is collected or sent.
+
+COPYRIGHT NOTICE:
+The logic and architecture of this script were authored by Ayush Singhal for Deluxe Media.
+"""
+
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
-from PIL import Image, ImageTk, ImageFilter # Added ImageFilter
+from PIL import Image, ImageTk, ImageFilter
 from psd_tools import PSDImage
 import os
 import threading
@@ -16,26 +35,18 @@ class ProMediaTool(ctk.CTk):
 
         self.title("Media Workflow Studio Pro")
         self.geometry("950x650")
-        class ProMediaTool(ctk.CTk):
-    def __init__(self):
-        super().__init__()
 
-        self.title("Media Workflow Studio Pro")
-        self.geometry("950x650")
-
-        # --- HIDDEN SIGNATURE (EASTER EGG) ---
-        # This binds the keys "Control + Alt + A" to run the secret function
+        # --- HIDDEN AUTHOR SIGNATURE (EASTER EGG) ---
+        # Press Control + Alt + A to reveal authorship
         self.bind("<Control-Alt-a>", self._reveal_author)
+        self._author_signature = "Code by Ayush Singhal | Deluxe Media"
         
-        # Define internal authorship variable (visible if code is audited/decompiled)
-        self._author_signature = "Original Code by Ayush Singhal - 2025"
-        
-        # --- Layout ---
-        self.grid_columnconfigure(0, weight=3)
-        self.grid_columnconfigure(1, weight=2)
+        # --- Layout Grid Configuration ---
+        self.grid_columnconfigure(0, weight=3) # Left Control Panel
+        self.grid_columnconfigure(1, weight=2) # Right Preview Panel
         self.grid_rowconfigure(0, weight=1)
 
-        # LEFT SIDE: Controls
+        # --- LEFT PANEL: Controls ---
         self.left_frame = ctk.CTkFrame(self, corner_radius=0)
         self.left_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
 
@@ -44,9 +55,9 @@ class ProMediaTool(ctk.CTk):
 
         self.tab_psd = self.tab_view.add("PSD Bulk Converter")
         self.tab_resize = self.tab_view.add("Smart Resizer")
-        self.tab_banner = self.tab_view.add("Banner & Rename")
+        self.tab_banner = self.tab_view.add("HD Banner & Rename")
 
-        # RIGHT SIDE: Preview & Logs
+        # --- RIGHT PANEL: Preview & Logs ---
         self.right_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="#1a1a1a")
         self.right_frame.grid(row=0, column=1, sticky="nsew", padx=(0,10), pady=10)
         
@@ -58,29 +69,49 @@ class ProMediaTool(ctk.CTk):
 
         self.log_box = ctk.CTkTextbox(self.right_frame, height=150)
         self.log_box.pack(fill="x", padx=10, pady=10, side="bottom")
-        self.log("System Ready. HD Sharpening Active.")
+        self.log("System Ready. Automation Engine Active.")
 
+        # Internal State
         self.file_list = [] 
 
+        # Initialize Tabs
         self._setup_psd_tab()
         self._setup_resize_tab()
         self._setup_banner_tab()
 
-    # --- CRITICAL: Resource Path Helper ---
+    # --- CORE UTILITY: Resource Path Helper ---
     def resource_path(self, relative_path):
-        """ Get absolute path to resource, works for dev and for PyInstaller """
+        """ 
+        Get absolute path to resource.
+        Works for development (local folder) and PyInstaller (frozen EXE in temp folder).
+        """
         try:
             base_path = sys._MEIPASS
         except Exception:
             base_path = os.path.abspath(".")
         return os.path.join(base_path, relative_path)
 
-    # --- UTILS ---
+    # --- HIDDEN AUTHOR FUNCTION ---
+    def _reveal_author(self, event=None):
+        """ Secret popup triggered by Ctrl+Alt+A """
+        messagebox.showinfo(
+            "Developer Signature",
+            "MEDIA WORKFLOW STUDIO PRO\n"
+            "---------------------------\n"
+            "Architected & Developed by:\n"
+            "Ayush Singhal\n\n"
+            "Built for: Deluxe Media\n"
+            "Version: 2.1\n"
+            "Status: Internal Tool"
+        )
+
+    # --- GUI UTILITIES ---
     def log(self, message):
         self.log_box.insert("end", f"> {message}\n")
         self.log_box.see("end")
 
     def show_preview(self, filepath):
+        """ Generates a safe, read-only thumbnail for the UI """
         try:
             if filepath.lower().endswith(".psd"):
                 self.lbl_preview_img.configure(text="Loading PSD...", image="")
@@ -90,6 +121,7 @@ class ProMediaTool(ctk.CTk):
             else:
                 img = Image.open(filepath)
 
+            # Thumbnail only - does not affect original
             img.thumbnail((250, 300))
             ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
             self.lbl_preview_img.configure(image=ctk_img, text="")
@@ -105,15 +137,20 @@ class ProMediaTool(ctk.CTk):
         if files: self.show_preview(files[0])
 
     def save_image_pro(self, img_obj, output_path, original_dpi=(72, 72)):
+        """ 
+        Standardized Saving Logic:
+        - Forces RGB (Fixes CMYK/Transparency issues)
+        - Max Quality (100)
+        - No Chroma Subsampling (4:4:4) for sharp red text
+        """
         if img_obj.mode in ("RGBA", "P", "CMYK"):
             img_obj = img_obj.convert("RGB")
         
-        # Save with maximum possible JPG fidelity
         img_obj.save(
             output_path, 
             "JPEG", 
-            quality=100,       # Max compression quality
-            subsampling=0,     # 4:4:4 (Prevents color bleeding on text)
+            quality=100,       
+            subsampling=0,     
             dpi=original_dpi
         )
 
@@ -125,7 +162,7 @@ class ProMediaTool(ctk.CTk):
             self.update_file_list_display(listbox_widget, files)
             self.log(f"Selected {len(files)} files.")
 
-    # --- FEATURES ---
+    # --- FEATURE 1: PSD CONVERSION ---
     def _setup_psd_tab(self):
         ctk.CTkLabel(self.tab_psd, text="Batch Convert PSD to JPG", font=("Arial", 14, "bold")).pack(pady=10)
         ctk.CTkButton(self.tab_psd, text="Select Files", command=lambda: self.select_files(self.txt_psd, "psd")).pack(pady=5)
@@ -144,6 +181,7 @@ class ProMediaTool(ctk.CTk):
             except Exception as e: self.log(f"Error: {e}")
         messagebox.showinfo("Done", "Batch Complete")
 
+    # --- FEATURE 2: SMART RESIZING ---
     def _setup_resize_tab(self):
         ctk.CTkLabel(self.tab_resize, text="Batch Resize 2:3 Artworks", font=("Arial", 14, "bold")).pack(pady=10)
         ctk.CTkButton(self.tab_resize, text="Select Files", command=lambda: self.select_files(self.txt_res, "img")).pack(pady=5)
@@ -159,10 +197,9 @@ class ProMediaTool(ctk.CTk):
             try:
                 img = Image.open(f)
                 dpi = img.info.get('dpi', (72, 72))
-                img = img.resize((w, h), Image.Resampling.LANCZOS)
                 
-                # Apply mild sharpening to resized images to keep them crisp
-                img = img.filter(ImageFilter.UnsharpMask(radius=0.6, percent=100, threshold=3))
+                # Resampling Logic: Pure Lanczos (No Sharpening applied per update 2.1)
+                img = img.resize((w, h), Image.Resampling.LANCZOS)
                 
                 out = os.path.splitext(f)[0] + f"_{self.res_var.get()}.jpg"
                 self.save_image_pro(img, out, dpi)
@@ -170,18 +207,21 @@ class ProMediaTool(ctk.CTk):
             except Exception as e: self.log(f"Error: {e}")
         messagebox.showinfo("Done", "Batch Complete")
 
+    # --- FEATURE 3: HD BANNER & RENAME ---
     def _setup_banner_tab(self):
-        ctk.CTkLabel(self.tab_banner, text="Banner Application (Embedded)", font=("Arial", 14, "bold")).pack(pady=10)
+        ctk.CTkLabel(self.tab_banner, text="HD Banner Application (Embedded)", font=("Arial", 14, "bold")).pack(pady=10)
         ctk.CTkButton(self.tab_banner, text="Select Files", command=lambda: self.select_files(self.txt_ban, "img")).pack(pady=5)
         self.txt_ban = ctk.CTkTextbox(self.tab_banner, height=80, state="disabled")
         self.txt_ban.pack(pady=5, fill="x", padx=10)
         
+        # Renaming UI
         fr = ctk.CTkFrame(self.tab_banner, fg_color="#2b2b2b")
         fr.pack(fill="x", padx=10, pady=10)
         ctk.CTkLabel(fr, text="Output Title Name:").pack(anchor="w", padx=10)
         self.entry_title = ctk.CTkEntry(fr, placeholder_text="e.g. SummerSale")
         self.entry_title.pack(fill="x", padx=10, pady=5)
         
+        # Banner Selection
         self.ban_type = ctk.StringVar(value="2day")
         r_frame = ctk.CTkFrame(self.tab_banner, fg_color="transparent")
         r_frame.pack(pady=5)
@@ -191,12 +231,16 @@ class ProMediaTool(ctk.CTk):
         ctk.CTkButton(self.tab_banner, text="Process Banners", fg_color="green", command=lambda: threading.Thread(target=self._process_ban, daemon=True).start()).pack(pady=15)
 
     def _process_ban(self):
-        art_w, art_h, final_w, final_h = 286, 371, 286, 410
+        # Configuration
+        art_w, art_h = 286, 371
+        final_w, final_h = 286, 410
+        
+        # Security: Load internal resource safely
         tpl_name = "banner_2day.png" if self.ban_type.get() == "2day" else "banner_3day.png"
         tpl_path = self.resource_path(tpl_name)
 
         if not os.path.exists(tpl_path):
-            messagebox.showerror("Error", f"Internal Error: Cannot find {tpl_name}")
+            messagebox.showerror("Error", f"Internal Security Error: Cannot find {tpl_name}")
             return
 
         user_title = self.entry_title.get().strip()
@@ -206,49 +250,40 @@ class ProMediaTool(ctk.CTk):
                 img = Image.open(fpath)
                 dpi = img.info.get('dpi', (72, 72))
                 
-                # 1. Resize with High Quality Filter
+                # 1. Resize Art (Lanczos)
                 img_res = img.resize((art_w, art_h), Image.Resampling.LANCZOS)
                 
-                # 2. NEW: Smart Sharpening (Unsharp Mask)
-                # This makes the small image look crisp, like a Retina display
+                # 2. HD Sharpening (Kept for Banner Text Legibility)
                 img_res = img_res.filter(ImageFilter.UnsharpMask(radius=0.8, percent=110, threshold=3))
                 
+                # 3. Canvas Composition
                 canvas = Image.new("RGB", (final_w, final_h), (255, 255, 255))
                 canvas.paste(img_res, (0, 0))
                 
+                # 4. Overlay Template
                 banner = Image.open(tpl_path).convert("RGBA")
                 if banner.size != (final_w, final_h):
                     banner = banner.resize((final_w, final_h), Image.Resampling.LANCZOS)
-                
-                # Composite
                 canvas.paste(banner, (0, 0), mask=banner)
 
-                # Rename
+                # 5. Smart Renaming Logic
                 suffix = "2DayBanner_286x410" if self.ban_type.get() == "2day" else "3DayBanner_286x410"
                 if user_title:
-                    fname = f"{user_title}_{i+1:02d}_{suffix}.jpg" if len(self.file_list) > 1 else f"{user_title}_{suffix}.jpg"
+                    if len(self.file_list) > 1:
+                         fname = f"{user_title}_{i+1:02d}_{suffix}.jpg"
+                    else:
+                         fname = f"{user_title}_{suffix}.jpg"
                 else:
                     fname = os.path.splitext(os.path.basename(fpath))[0] + f"_{suffix}.jpg"
 
-                self.save_image_pro(canvas, os.path.join(os.path.dirname(fpath), fname), dpi)
+                # 6. Secure Save
+                save_path = os.path.join(os.path.dirname(fpath), fname)
+                self.save_image_pro(canvas, save_path, dpi)
                 self.log(f"Created (HD): {fname}")
+                
             except Exception as e: self.log(f"Error: {e}")
-        messagebox.showinfo("Success", "Banners Created")
-# --- HIDDEN AUTHOR FUNCTION ---
-    def _reveal_author(self, event=None):
-        """ 
-        This popup only appears if you press Ctrl+Alt+A.
-        Regular users will never see this.
-        """
-        messagebox.showinfo(
-            "Developer Signature",
-            "MEDIA WORKFLOW STUDIO PRO\n"
-            "---------------------------\n"
-            "Core Architecture & Code by:\n"
-            "Ayush Singhal\n\n"
-            "Built internally for Deluxe Media\n"
-            "Date: 2025"
-        )
+        messagebox.showinfo("Success", "HD Banners Created")
+
 if __name__ == "__main__":
     app = ProMediaTool()
     app.mainloop()
