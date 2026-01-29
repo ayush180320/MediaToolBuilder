@@ -2,7 +2,7 @@
 APPLICATION SECURITY MANIFEST & AUDIT LOG
 -----------------------------------------
 App Name:       Media Workflow Studio Pro
-Version:        2.1 (GitHub Release)
+Version:        3.0 (Drag & Drop + Live Preview)
 Author:         Ayush Singhal
 Company:        Deluxe Media
 Created:        2025
@@ -19,22 +19,28 @@ The logic and architecture of this script were authored by Ayush Singhal for Del
 
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
+from tkinterdnd2 import DND_FILES, TkinterDnD
 from PIL import Image, ImageTk, ImageFilter
 from psd_tools import PSDImage
 import os
 import threading
 import sys
+import re
 
 # --- Configuration & Theme ---
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("dark-blue")
 
-class ProMediaTool(ctk.CTk):
+# Inherit from CTk and the DnD wrapper to enable Drag and Drop
+class ProMediaTool(ctk.CTk, TkinterDnD.DnDWrapper):
     def __init__(self):
         super().__init__()
+        
+        # Initialize Drag & Drop capability
+        self.TkdndVersion = TkinterDnD._require(self)
 
         self.title("Media Workflow Studio Pro")
-        self.geometry("950x650")
+        self.geometry("1000x700")
 
         # --- HIDDEN AUTHOR SIGNATURE (EASTER EGG) ---
         # Press Control + Alt + A to reveal authorship
@@ -57,76 +63,176 @@ class ProMediaTool(ctk.CTk):
         self.tab_resize = self.tab_view.add("Smart Resizer")
         self.tab_banner = self.tab_view.add("HD Banner & Rename")
 
-        # --- RIGHT PANEL: Preview & Logs ---
+        # --- RIGHT PANEL: Preview & Info ---
         self.right_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="#1a1a1a")
         self.right_frame.grid(row=0, column=1, sticky="nsew", padx=(0,10), pady=10)
         
         self.lbl_preview_title = ctk.CTkLabel(self.right_frame, text="Live Preview", font=("Roboto", 16, "bold"))
         self.lbl_preview_title.pack(pady=(20, 10))
         
-        self.lbl_preview_img = ctk.CTkLabel(self.right_frame, text="[No Selection]", width=250, height=300, fg_color="#2b2b2b", corner_radius=10)
+        # Preview Image Box
+        self.lbl_preview_img = ctk.CTkLabel(self.right_frame, text="[Drag Files Here]", width=286, height=410, fg_color="#2b2b2b", corner_radius=10)
         self.lbl_preview_img.pack(pady=10, padx=20)
 
-        self.log_box = ctk.CTkTextbox(self.right_frame, height=150)
-        self.log_box.pack(fill="x", padx=10, pady=10, side="bottom")
-        self.log("System Ready. Automation Engine Active.")
+        # File Info Panel (Replaces Log Box)
+        self.lbl_info_title = ctk.CTkLabel(self.right_frame, text="File Information", font=("Roboto", 12, "bold"), text_color="gray70")
+        self.lbl_info_title.pack(pady=(20, 0), anchor="w", padx=10)
+        
+        self.info_box = ctk.CTkTextbox(self.right_frame, height=120, fg_color="#222222", text_color="#00E5FF")
+        self.info_box.pack(fill="x", padx=10, pady=5, side="top")
+        self.info_box.insert("0.0", "Waiting for selection...")
+        self.info_box.configure(state="disabled")
 
         # Internal State
-        self.file_list = [] 
+        self.file_list = []
+        self.current_preview_path = None # Tracks valid path for live preview
+        self.current_tab = "psd" # Track active tab
 
         # Initialize Tabs
         self._setup_psd_tab()
         self._setup_resize_tab()
         self._setup_banner_tab()
+        
+        # --- ENABLE DRAG & DROP ---
+        # Bind the drop event to the whole window
+        self.drop_target_register(DND_FILES)
+        self.dnd_bind('<<Drop>>', self.drop_files_handler)
 
-    # --- CORE UTILITY: Resource Path Helper ---
+    # --- CORE UTILITY: Resource Path ---
     def resource_path(self, relative_path):
-        """ 
-        Get absolute path to resource.
-        Works for development (local folder) and PyInstaller (frozen EXE in temp folder).
-        """
         try:
             base_path = sys._MEIPASS
         except Exception:
             base_path = os.path.abspath(".")
         return os.path.join(base_path, relative_path)
 
-    # --- HIDDEN AUTHOR FUNCTION ---
-    def _reveal_author(self, event=None):
-        """ Secret popup triggered by Ctrl+Alt+A """
-        messagebox.showinfo(
-            "Developer Signature",
-            "MEDIA WORKFLOW STUDIO PRO\n"
-            "---------------------------\n"
-            "Architected & Developed by:\n"
-            "Ayush Singhal\n\n"
-            "Built for: Deluxe Media\n"
-            "Version: 2.1\n"
-            "Status: Internal Tool"
-        )
+    # --- DRAG & DROP HANDLER ---
+    def drop_files_handler(self, event):
+        raw_files = event.data
+        # Windows Drag&Drop formats paths with {} if they contain spaces. Regex fixes this.
+        if "{" in raw_files:
+            files = re.findall(r'\{.*?\}|\S+', raw_files)
+            files = [f.replace("{", "").replace("}", "") for f in files]
+        else:
+            files = raw_files.split()
+        
+        if files:
+            self.file_list = files
+            self.current_preview_path = files[0]
+            
+            # Update the text box of the currently active tab
+            active_tab = self.tab_view.get()
+            if active_tab == "PSD Bulk Converter":
+                self.update_file_list_display(self.txt_psd, files)
+            elif active_tab == "Smart Resizer":
+                self.update_file_list_display(self.txt_res, files)
+            elif active_tab == "HD Banner & Rename":
+                self.update_file_list_display(self.txt_ban, files)
 
-    # --- GUI UTILITIES ---
-    def log(self, message):
-        self.log_box.insert("end", f"> {message}\n")
-        self.log_box.see("end")
+            # Trigger File Info & Preview
+            self.update_file_info(files[0])
+            self.refresh_preview()
 
-    def show_preview(self, filepath):
-        """ Generates a safe, read-only thumbnail for the UI """
+    # --- FILE INFO PANEL ---
+    def update_file_info(self, filepath):
         try:
+            size_mb = os.path.getsize(filepath) / (1024 * 1024)
+            
             if filepath.lower().endswith(".psd"):
-                self.lbl_preview_img.configure(text="Loading PSD...", image="")
-                self.update()
                 psd = PSDImage.open(filepath)
-                img = psd.composite()
+                w, h = psd.width, psd.height
+                fmt = "PSD (Adobe)"
+                mode = psd.color_mode
             else:
                 img = Image.open(filepath)
+                w, h = img.size
+                fmt = img.format
+                mode = img.mode
+                
+            info_text = (
+                f"Filename: {os.path.basename(filepath)}\n"
+                f"Dimensions: {w} x {h} px\n"
+                f"Format: {fmt} | Mode: {mode}\n"
+                f"Size: {size_mb:.2f} MB"
+            )
+        except Exception as e:
+            info_text = f"Could not read file info.\nError: {str(e)}"
 
-            # Thumbnail only - does not affect original
-            img.thumbnail((250, 300))
+        self.info_box.configure(state="normal")
+        self.info_box.delete("0.0", "end")
+        self.info_box.insert("0.0", info_text)
+        self.info_box.configure(state="disabled")
+
+    # --- LIVE PREVIEW ENGINE ---
+    def refresh_preview(self):
+        """ 
+        Smart Preview that changes based on Context (Tab + Selected Options) 
+        """
+        if not self.current_preview_path:
+            return
+
+        try:
+            # 1. Load Base Image
+            if self.current_preview_path.lower().endswith(".psd"):
+                psd = PSDImage.open(self.current_preview_path)
+                img = psd.composite()
+            else:
+                img = Image.open(self.current_preview_path)
+
+            active_tab = self.tab_view.get()
+
+            # 2. IF BANNER TAB: Apply Live Composition
+            if active_tab == "HD Banner & Rename":
+                
+                # Configuration for Preview (Same as Production)
+                art_w, art_h = 286, 371
+                final_w, final_h = 286, 410
+                
+                # Resize Art
+                img = img.resize((art_w, art_h), Image.Resampling.LANCZOS)
+                
+                # Create Canvas
+                canvas = Image.new("RGB", (final_w, final_h), (255, 255, 255))
+                canvas.paste(img, (0, 0))
+                
+                # Load Banner Template
+                tpl_name = "banner_2day.png" if self.ban_type.get() == "2day" else "banner_3day.png"
+                tpl_path = self.resource_path(tpl_name)
+                
+                if os.path.exists(tpl_path):
+                    banner = Image.open(tpl_path).convert("RGBA")
+                    if banner.size != (final_w, final_h):
+                        banner = banner.resize((final_w, final_h), Image.Resampling.LANCZOS)
+                    # Overlay Banner on Preview
+                    canvas.paste(banner, (0, 0), mask=banner)
+                    img = canvas # The preview is now the composited banner
+                else:
+                    print("Template not found for preview")
+
+            # 3. Display Result
+            # Scale down for UI fits
+            img.thumbnail((286, 410)) 
             ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
             self.lbl_preview_img.configure(image=ctk_img, text="")
-        except Exception:
-            self.lbl_preview_img.configure(text="Preview Unavailable", image="")
+            
+        except Exception as e:
+            self.lbl_preview_img.configure(text=f"Preview Error", image="")
+            print(e)
+
+    def save_image_pro(self, img_obj, output_path, original_dpi=(72, 72)):
+        if img_obj.mode in ("RGBA", "P", "CMYK"):
+            img_obj = img_obj.convert("RGB")
+        img_obj.save(output_path, "JPEG", quality=100, subsampling=0, dpi=original_dpi)
+
+    def select_files(self, listbox_widget, mode):
+        filetypes = [("Photoshop", "*.psd")] if mode == "psd" else [("Images", "*.jpg;*.png;*.jpeg")]
+        files = filedialog.askopenfilenames(filetypes=filetypes)
+        if files:
+            self.file_list = files
+            self.current_preview_path = files[0]
+            self.update_file_list_display(listbox_widget, files)
+            self.update_file_info(files[0])
+            self.refresh_preview()
 
     def update_file_list_display(self, listbox, files):
         listbox.configure(state="normal")
@@ -134,37 +240,10 @@ class ProMediaTool(ctk.CTk):
         for f in files:
             listbox.insert("end", f"{os.path.basename(f)}\n")
         listbox.configure(state="disabled")
-        if files: self.show_preview(files[0])
-
-    def save_image_pro(self, img_obj, output_path, original_dpi=(72, 72)):
-        """ 
-        Standardized Saving Logic:
-        - Forces RGB (Fixes CMYK/Transparency issues)
-        - Max Quality (100)
-        - No Chroma Subsampling (4:4:4) for sharp red text
-        """
-        if img_obj.mode in ("RGBA", "P", "CMYK"):
-            img_obj = img_obj.convert("RGB")
-        
-        img_obj.save(
-            output_path, 
-            "JPEG", 
-            quality=100,       
-            subsampling=0,     
-            dpi=original_dpi
-        )
-
-    def select_files(self, listbox_widget, mode):
-        filetypes = [("Photoshop", "*.psd")] if mode == "psd" else [("Images", "*.jpg;*.png;*.jpeg")]
-        files = filedialog.askopenfilenames(filetypes=filetypes)
-        if files:
-            self.file_list = files
-            self.update_file_list_display(listbox_widget, files)
-            self.log(f"Selected {len(files)} files.")
 
     # --- FEATURE 1: PSD CONVERSION ---
     def _setup_psd_tab(self):
-        ctk.CTkLabel(self.tab_psd, text="Batch Convert PSD to JPG", font=("Arial", 14, "bold")).pack(pady=10)
+        ctk.CTkLabel(self.tab_psd, text="Drag PSD files here", font=("Arial", 14, "bold"), text_color="gray50").pack(pady=10)
         ctk.CTkButton(self.tab_psd, text="Select Files", command=lambda: self.select_files(self.txt_psd, "psd")).pack(pady=5)
         self.txt_psd = ctk.CTkTextbox(self.tab_psd, height=150, state="disabled")
         self.txt_psd.pack(pady=10, fill="x", padx=10)
@@ -177,13 +256,12 @@ class ProMediaTool(ctk.CTk):
                 img = psd.composite()
                 out = os.path.splitext(f)[0] + ".jpg"
                 self.save_image_pro(img, out)
-                self.log(f"Converted: {os.path.basename(out)}")
-            except Exception as e: self.log(f"Error: {e}")
+            except Exception: pass
         messagebox.showinfo("Done", "Batch Complete")
 
     # --- FEATURE 2: SMART RESIZING ---
     def _setup_resize_tab(self):
-        ctk.CTkLabel(self.tab_resize, text="Batch Resize 2:3 Artworks", font=("Arial", 14, "bold")).pack(pady=10)
+        ctk.CTkLabel(self.tab_resize, text="Drag Images here", font=("Arial", 14, "bold"), text_color="gray50").pack(pady=10)
         ctk.CTkButton(self.tab_resize, text="Select Files", command=lambda: self.select_files(self.txt_res, "img")).pack(pady=5)
         self.txt_res = ctk.CTkTextbox(self.tab_resize, height=100, state="disabled")
         self.txt_res.pack(pady=10, fill="x", padx=10)
@@ -197,92 +275,70 @@ class ProMediaTool(ctk.CTk):
             try:
                 img = Image.open(f)
                 dpi = img.info.get('dpi', (72, 72))
-                
-                # Resampling Logic: Pure Lanczos (No Sharpening applied per update 2.1)
-                img = img.resize((w, h), Image.Resampling.LANCZOS)
-                
+                img = img.resize((w, h), Image.Resampling.LANCZOS) # No sharpening here
                 out = os.path.splitext(f)[0] + f"_{self.res_var.get()}.jpg"
                 self.save_image_pro(img, out, dpi)
-                self.log(f"Resized: {os.path.basename(out)}")
-            except Exception as e: self.log(f"Error: {e}")
+            except Exception: pass
         messagebox.showinfo("Done", "Batch Complete")
 
-    # --- FEATURE 3: HD BANNER & RENAME ---
+    # --- FEATURE 3: HD BANNER ---
     def _setup_banner_tab(self):
-        ctk.CTkLabel(self.tab_banner, text="HD Banner Application (Embedded)", font=("Arial", 14, "bold")).pack(pady=10)
+        ctk.CTkLabel(self.tab_banner, text="Live Banner Preview", font=("Arial", 14, "bold")).pack(pady=10)
         ctk.CTkButton(self.tab_banner, text="Select Files", command=lambda: self.select_files(self.txt_ban, "img")).pack(pady=5)
         self.txt_ban = ctk.CTkTextbox(self.tab_banner, height=80, state="disabled")
         self.txt_ban.pack(pady=5, fill="x", padx=10)
         
-        # Renaming UI
+        # Renaming
         fr = ctk.CTkFrame(self.tab_banner, fg_color="#2b2b2b")
         fr.pack(fill="x", padx=10, pady=10)
         ctk.CTkLabel(fr, text="Output Title Name:").pack(anchor="w", padx=10)
         self.entry_title = ctk.CTkEntry(fr, placeholder_text="e.g. SummerSale")
         self.entry_title.pack(fill="x", padx=10, pady=5)
         
-        # Banner Selection
+        # Banner Selection with LIVE PREVIEW TRIGGER
         self.ban_type = ctk.StringVar(value="2day")
         r_frame = ctk.CTkFrame(self.tab_banner, fg_color="transparent")
         r_frame.pack(pady=5)
-        ctk.CTkRadioButton(r_frame, text="2-Day", variable=self.ban_type, value="2day").pack(side="left", padx=10)
-        ctk.CTkRadioButton(r_frame, text="3-Day", variable=self.ban_type, value="3day").pack(side="left", padx=10)
+        
+        # Adding command=self.refresh_preview to update image instantly when clicked
+        ctk.CTkRadioButton(r_frame, text="2-Day", variable=self.ban_type, value="2day", command=self.refresh_preview).pack(side="left", padx=10)
+        ctk.CTkRadioButton(r_frame, text="3-Day", variable=self.ban_type, value="3day", command=self.refresh_preview).pack(side="left", padx=10)
         
         ctk.CTkButton(self.tab_banner, text="Process Banners", fg_color="green", command=lambda: threading.Thread(target=self._process_ban, daemon=True).start()).pack(pady=15)
 
     def _process_ban(self):
-        # Configuration
-        art_w, art_h = 286, 371
-        final_w, final_h = 286, 410
-        
-        # Security: Load internal resource safely
+        art_w, art_h, final_w, final_h = 286, 371, 286, 410
         tpl_name = "banner_2day.png" if self.ban_type.get() == "2day" else "banner_3day.png"
         tpl_path = self.resource_path(tpl_name)
+        user_title = self.entry_title.get().strip()
 
         if not os.path.exists(tpl_path):
-            messagebox.showerror("Error", f"Internal Security Error: Cannot find {tpl_name}")
+            messagebox.showerror("Error", f"Missing {tpl_name}")
             return
-
-        user_title = self.entry_title.get().strip()
 
         for i, fpath in enumerate(self.file_list):
             try:
                 img = Image.open(fpath)
                 dpi = img.info.get('dpi', (72, 72))
-                
-                # 1. Resize Art (Lanczos)
                 img_res = img.resize((art_w, art_h), Image.Resampling.LANCZOS)
-                
-                # 2. HD Sharpening (Kept for Banner Text Legibility)
                 img_res = img_res.filter(ImageFilter.UnsharpMask(radius=0.8, percent=110, threshold=3))
                 
-                # 3. Canvas Composition
                 canvas = Image.new("RGB", (final_w, final_h), (255, 255, 255))
                 canvas.paste(img_res, (0, 0))
-                
-                # 4. Overlay Template
                 banner = Image.open(tpl_path).convert("RGBA")
                 if banner.size != (final_w, final_h):
                     banner = banner.resize((final_w, final_h), Image.Resampling.LANCZOS)
                 canvas.paste(banner, (0, 0), mask=banner)
 
-                # 5. Smart Renaming Logic
                 suffix = "2DayBanner_286x410" if self.ban_type.get() == "2day" else "3DayBanner_286x410"
-                if user_title:
-                    if len(self.file_list) > 1:
-                         fname = f"{user_title}_{i+1:02d}_{suffix}.jpg"
-                    else:
-                         fname = f"{user_title}_{suffix}.jpg"
-                else:
-                    fname = os.path.splitext(os.path.basename(fpath))[0] + f"_{suffix}.jpg"
-
-                # 6. Secure Save
-                save_path = os.path.join(os.path.dirname(fpath), fname)
-                self.save_image_pro(canvas, save_path, dpi)
-                self.log(f"Created (HD): {fname}")
+                fname = f"{user_title}_{i+1:02d}_{suffix}.jpg" if user_title and len(self.file_list) > 1 else (f"{user_title}_{suffix}.jpg" if user_title else os.path.splitext(os.path.basename(fpath))[0] + f"_{suffix}.jpg")
                 
-            except Exception as e: self.log(f"Error: {e}")
+                self.save_image_pro(canvas, os.path.join(os.path.dirname(fpath), fname), dpi)
+            except Exception: pass
         messagebox.showinfo("Success", "HD Banners Created")
+
+    def _reveal_author(self, event=None):
+        messagebox.showinfo("Developer Signature", "MEDIA WORKFLOW STUDIO PRO v3.0\nAyush Singhal | Deluxe Media")
 
 if __name__ == "__main__":
     app = ProMediaTool()
