@@ -1,4 +1,4 @@
-name: Build Media Tool EXE
+name: Build Media Tool v3.1
 
 on:
   push:
@@ -21,15 +21,16 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
+        # Re-install pyinstaller to ensure clean state
         pip install pyinstaller
 
-    - name: Build EXE (with TkinterDnD fix)
-      # This command fixes the "ModuleNotFoundError" by forcing the collector
+    - name: Build EXE (Force Include TkinterDnD)
+      # We use --collect-all to force grabbing the hidden library files
       run: |
-        pyinstaller --noconfirm --onefile --windowed --collect-all tkinterdnd2 --add-data "banner_2day.png;." --add-data "banner_3day.png;." media_tool.py
+        pyinstaller --noconfirm --onefile --windowed --name "MediaTool_v3_Final" --collect-all tkinterdnd2 --add-data "banner_2day.png;." --add-data "banner_3day.png;." media_tool.py
 
-    - name: Upload EXE
+    - name: Upload EXE Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: MediaTool_v3_Fixed
-        path: dist/media_tool.exe
+        name: MediaTool_v3_Final
+        path: dist/MediaTool_v3_Final.exe
