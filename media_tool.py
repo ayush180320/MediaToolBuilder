@@ -2,7 +2,7 @@
 APPLICATION SECURITY MANIFEST & AUDIT LOG
 -----------------------------------------
 App Name:       Media Workflow Studio Pro
-Version:        3.4 (PSD Engine Fix + Banner Info Fix)
+Version:        3.6 (Metadata Syntax Fix)
 Author:         Ayush Singhal
 Company:        Deluxe Media
 Purpose:        Local image manipulation.
@@ -40,7 +40,7 @@ class ProMediaTool(ctk.CTk, BaseClass):
     def __init__(self):
         super().__init__()
 
-        self.title("Media Workflow Studio Pro v3.4")
+        self.title("Media Workflow Studio Pro v3.6")
         self.geometry("1100x750")
 
         self.bind("<Control-Alt-a>", self._reveal_author)
@@ -121,7 +121,6 @@ class ProMediaTool(ctk.CTk, BaseClass):
         target_box.configure(state="disabled")
 
         self.current_preview_path = self.file_list[0]
-        # Important: Refresh preview FIRST, then update info (info might depend on successful read)
         self.refresh_preview()
         self.update_file_info(self.current_preview_path)
 
@@ -147,30 +146,28 @@ class ProMediaTool(ctk.CTk, BaseClass):
         files = filedialog.askopenfilenames(filetypes=ft)
         self.handle_files_input(files)
 
-    # --- FILE INFO ENGINE ---
+    # --- FILE INFO ENGINE (FIXED) ---
     def update_file_info(self, filepath):
         txt = "Reading..."
         try:
             size_mb = os.path.getsize(filepath) / (1024 * 1024)
             
             if filepath.lower().endswith(".psd"):
-                # Wrap PSD read in specific try/catch to debug preview errors
-                try:
-                    psd = PSDImage.open(filepath)
-                    w, h, fmt, mode = psd.width, psd.height, "PSD (Adobe)", psd.color_mode
-                except Exception as e:
-                    txt = f"PSD Error: {str(e)}\n(Try restarting app)"
-                    raise e # Re-raise to skip to final block
+                # Use psd_tools to read metadata
+                psd = PSDImage.open(filepath)
+                w, h, fmt, mode = psd.width, psd.height, "PSD (Adobe)", psd.color_mode
             else:
+                # Use Pillow to read metadata
                 img = Image.open(filepath)
-                w, h, fmt, mode = img.size, img.format, img.mode
+                # --- FIXED: Correct tuple unpacking ---
+                w, h = img.size
+                fmt = img.format if img.format else "Image"
+                mode = img.mode
             
             txt = f"File: {os.path.basename(filepath)}\nDim: {w}x{h}\nType: {fmt} | {mode}\nSize: {size_mb:.2f} MB"
             
-        except Exception:
-            # If txt wasn't set by the specific PSD error above, use generic
-            if "PSD Error" not in txt:
-                txt = f"Could not read metadata.\nFile: {os.path.basename(filepath)}"
+        except Exception as e:
+            txt = f"Metadata Error:\n{str(e)}"
 
         self.info_box.configure(state="normal")
         self.info_box.delete("0.0", "end")
@@ -209,7 +206,7 @@ class ProMediaTool(ctk.CTk, BaseClass):
         if img.mode in ("RGBA", "P", "CMYK"): img = img.convert("RGB")
         img.save(path, "JPEG", quality=100, subsampling=0, dpi=dpi)
 
-    # --- TABS ---
+    # --- PROCESSORS ---
     def _setup_psd_tab(self):
         ctk.CTkLabel(self.tab_psd, text="PSD Bulk Converter", font=("Arial", 14, "bold")).pack(pady=5)
         ctk.CTkButton(self.tab_psd, text="Select Files", command=lambda: self.select_files("psd")).pack()
@@ -220,23 +217,16 @@ class ProMediaTool(ctk.CTk, BaseClass):
     def _process_psd(self):
         if not self.file_list: return messagebox.showwarning("Error", "No files selected")
         count = 0
-        errors = 0
         for f in self.file_list:
             try:
                 out_dir = os.path.join(os.path.dirname(f), "Converted_PSD")
                 os.makedirs(out_dir, exist_ok=True)
-                
                 psd = PSDImage.open(f)
                 out_path = os.path.join(out_dir, os.path.basename(os.path.splitext(f)[0] + ".jpg"))
                 self.save_image_pro(psd.composite(), out_path)
                 count += 1
-            except Exception as e:
-                print(f"PSD Fail: {e}")
-                errors += 1
-        
-        msg = f"Converted {count} files."
-        if errors > 0: msg += f"\nFailed: {errors} (See console or info box)"
-        messagebox.showinfo("Report", msg)
+            except Exception as e: print(e)
+        messagebox.showinfo("Report", f"Converted {count} files.")
 
     def _setup_resize_tab(self):
         ctk.CTkLabel(self.tab_resize, text="Smart Resizer", font=("Arial", 14, "bold")).pack(pady=5)
@@ -255,7 +245,6 @@ class ProMediaTool(ctk.CTk, BaseClass):
             try:
                 out_dir = os.path.join(os.path.dirname(f), "Resized_Output")
                 os.makedirs(out_dir, exist_ok=True)
-
                 img = Image.open(f)
                 img = img.resize((w, h), Image.Resampling.LANCZOS)
                 out_path = os.path.join(out_dir, os.path.basename(os.path.splitext(f)[0] + f"_{self.res_var.get()}.jpg"))
@@ -271,12 +260,10 @@ class ProMediaTool(ctk.CTk, BaseClass):
         self.txt_ban.pack(pady=5, fill="x")
         self.entry_title = ctk.CTkEntry(self.tab_banner, placeholder_text="Title Name (Optional)")
         self.entry_title.pack(fill="x", pady=5)
-        
         self.ban_type = ctk.StringVar(value="2day")
         r = ctk.CTkFrame(self.tab_banner); r.pack()
         ctk.CTkRadioButton(r, text="2-Day", variable=self.ban_type, value="2day", command=self.refresh_preview).pack(side="left", padx=5)
         ctk.CTkRadioButton(r, text="3-Day", variable=self.ban_type, value="3day", command=self.refresh_preview).pack(side="left", padx=5)
-        
         ctk.CTkButton(self.tab_banner, text="Process All", fg_color="green", command=lambda: threading.Thread(target=self._process_ban, daemon=True).start()).pack(pady=10)
 
     def _process_ban(self):
@@ -284,35 +271,29 @@ class ProMediaTool(ctk.CTk, BaseClass):
         tpl = "banner_2day.png" if self.ban_type.get() == "2day" else "banner_3day.png"
         tpl_path = self.resource_path(tpl)
         if not os.path.exists(tpl_path): return messagebox.showerror("Error", f"Missing {tpl}")
-
+        
         count = 0
         user_title = self.entry_title.get().strip()
-        
         for i, fpath in enumerate(self.file_list):
             try:
                 out_dir = os.path.join(os.path.dirname(fpath), "Banner_Output")
                 os.makedirs(out_dir, exist_ok=True)
-
                 img = Image.open(fpath)
                 dpi = img.info.get('dpi', (72, 72))
                 img_res = img.resize((286, 371), Image.Resampling.LANCZOS)
                 img_res = img_res.filter(ImageFilter.UnsharpMask(radius=0.8, percent=110, threshold=3))
-                
                 canvas = Image.new("RGB", (286, 410), (255, 255, 255))
                 canvas.paste(img_res, (0, 0))
                 banner = Image.open(tpl_path).convert("RGBA").resize((286, 410), Image.Resampling.LANCZOS)
                 canvas.paste(banner, (0, 0), mask=banner)
-
                 suffix = "2DayBanner_286x410" if self.ban_type.get() == "2day" else "3DayBanner_286x410"
                 if user_title:
                     fname = f"{user_title}_{i+1:02d}_{suffix}.jpg" if len(self.file_list) > 1 else f"{user_title}_{suffix}.jpg"
                 else:
                     fname = os.path.splitext(os.path.basename(fpath))[0] + f"_{suffix}.jpg"
-
                 self.save_image_pro(canvas, os.path.join(out_dir, fname), dpi)
                 count += 1
             except Exception as e: print(e)
-
         messagebox.showinfo("Success", f"Processed {count} Banners.")
 
     def _reveal_author(self, event=None):
