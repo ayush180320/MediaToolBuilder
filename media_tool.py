@@ -2,7 +2,7 @@
 APPLICATION SECURITY MANIFEST & AUDIT LOG
 -----------------------------------------
 App Name:       Media Workflow Studio Pro
-Version:        3.6 (Metadata Syntax Fix)
+Version:        3.7 (Photoshop Logic + Reset + Auto-Clear)
 Author:         Ayush Singhal
 Company:        Deluxe Media
 Purpose:        Local image manipulation.
@@ -40,8 +40,9 @@ class ProMediaTool(ctk.CTk, BaseClass):
     def __init__(self):
         super().__init__()
 
-        self.title("Media Workflow Studio Pro v3.6")
-        self.geometry("1100x750")
+        self.title("Media Workflow Studio Pro v3.7")
+        # RESIZED: 650px height prevents covering taskbar on 1080p/768p screens
+        self.geometry("1100x650") 
 
         self.bind("<Control-Alt-a>", self._reveal_author)
         
@@ -54,7 +55,8 @@ class ProMediaTool(ctk.CTk, BaseClass):
         self.left_frame = ctk.CTkFrame(self, corner_radius=0)
         self.left_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
 
-        self.tab_view = ctk.CTkTabview(self.left_frame)
+        # Added command=self.on_tab_switch to AUTO-RESET when changing tabs
+        self.tab_view = ctk.CTkTabview(self.left_frame, command=self.on_tab_switch)
         self.tab_view.pack(fill="both", expand=True, padx=10, pady=10)
 
         self.tab_psd = self.tab_view.add("PSD Bulk Converter")
@@ -79,7 +81,7 @@ class ProMediaTool(ctk.CTk, BaseClass):
         self.lbl_info_title = ctk.CTkLabel(self.right_frame, text="File Information", font=("Roboto", 12, "bold"), text_color="gray70")
         self.lbl_info_title.pack(pady=(10, 0), anchor="w", padx=20)
         
-        self.info_box = ctk.CTkTextbox(self.right_frame, height=100, fg_color="#222222", text_color="#00E5FF")
+        self.info_box = ctk.CTkTextbox(self.right_frame, height=80, fg_color="#222222", text_color="#00E5FF")
         self.info_box.pack(fill="x", padx=20, pady=5, side="top")
         self.info_box.insert("0.0", "Waiting for selection...")
         self.info_box.configure(state="disabled")
@@ -102,6 +104,36 @@ class ProMediaTool(ctk.CTk, BaseClass):
         try: base_path = sys._MEIPASS
         except: base_path = os.path.abspath(".")
         return os.path.join(base_path, relative_path)
+
+    # --- RESET ENGINE ---
+    def reset_ui(self):
+        """Clears all data, text boxes, and previews"""
+        self.file_list = []
+        self.file_names = []
+        self.current_preview_path = None
+        
+        # Clear Right Panel
+        self.preview_selector.set("No Files Selected")
+        self.preview_selector.configure(state="disabled")
+        self.lbl_preview_img.configure(image=None, text="[Drag Files Here]")
+        
+        self.info_box.configure(state="normal")
+        self.info_box.delete("0.0", "end")
+        self.info_box.insert("0.0", "Waiting for selection...")
+        self.info_box.configure(state="disabled")
+        
+        # Clear Left Panel Textboxes
+        for txt in [self.txt_psd, self.txt_res, self.txt_ban]:
+            txt.configure(state="normal")
+            txt.delete("0.0", "end")
+            txt.configure(state="disabled")
+            
+        # Clear Entry
+        self.entry_title.delete(0, "end")
+
+    def on_tab_switch(self):
+        """Called automatically when tab changes"""
+        self.reset_ui()
 
     # --- INPUT HANDLING ---
     def handle_files_input(self, files):
@@ -146,26 +178,20 @@ class ProMediaTool(ctk.CTk, BaseClass):
         files = filedialog.askopenfilenames(filetypes=ft)
         self.handle_files_input(files)
 
-    # --- FILE INFO ENGINE (FIXED) ---
+    # --- FILE INFO ENGINE ---
     def update_file_info(self, filepath):
         txt = "Reading..."
         try:
             size_mb = os.path.getsize(filepath) / (1024 * 1024)
-            
             if filepath.lower().endswith(".psd"):
-                # Use psd_tools to read metadata
                 psd = PSDImage.open(filepath)
                 w, h, fmt, mode = psd.width, psd.height, "PSD (Adobe)", psd.color_mode
             else:
-                # Use Pillow to read metadata
                 img = Image.open(filepath)
-                # --- FIXED: Correct tuple unpacking ---
                 w, h = img.size
                 fmt = img.format if img.format else "Image"
                 mode = img.mode
-            
             txt = f"File: {os.path.basename(filepath)}\nDim: {w}x{h}\nType: {fmt} | {mode}\nSize: {size_mb:.2f} MB"
-            
         except Exception as e:
             txt = f"Metadata Error:\n{str(e)}"
 
@@ -178,6 +204,7 @@ class ProMediaTool(ctk.CTk, BaseClass):
     def refresh_preview(self):
         if not self.current_preview_path: return
         try:
+            # PHOTOSHOP LOGIC: Use High-Quality Resampling for Preview
             if self.current_preview_path.lower().endswith(".psd"):
                 psd = PSDImage.open(self.current_preview_path)
                 img = psd.composite()
@@ -196,20 +223,31 @@ class ProMediaTool(ctk.CTk, BaseClass):
                     canvas.paste(banner, (0, 0), mask=banner)
                     img = canvas
 
-            img.thumbnail((286, 410))
+            img.thumbnail((286, 410), Image.Resampling.LANCZOS)
             ctk_img = ctk.CTkImage(img, size=img.size)
             self.lbl_preview_img.configure(image=ctk_img, text="")
         except Exception as e:
             self.lbl_preview_img.configure(image="", text=f"Preview Failed\n{str(e)}")
 
     def save_image_pro(self, img, path, dpi=(72,72)):
+        """
+        PHOTOSHOP SETTINGS: 
+        1. Convert to RGB (standard web).
+        2. Quality=100 (Max).
+        3. Subsampling=0 (Disable chroma subsampling -> 4:4:4 color).
+        """
         if img.mode in ("RGBA", "P", "CMYK"): img = img.convert("RGB")
         img.save(path, "JPEG", quality=100, subsampling=0, dpi=dpi)
 
-    # --- PROCESSORS ---
+    # --- TABS ---
     def _setup_psd_tab(self):
         ctk.CTkLabel(self.tab_psd, text="PSD Bulk Converter", font=("Arial", 14, "bold")).pack(pady=5)
-        ctk.CTkButton(self.tab_psd, text="Select Files", command=lambda: self.select_files("psd")).pack()
+        
+        btn_frame = ctk.CTkFrame(self.tab_psd, fg_color="transparent")
+        btn_frame.pack(pady=5)
+        ctk.CTkButton(btn_frame, text="Select Files", command=lambda: self.select_files("psd")).pack(side="left", padx=5)
+        ctk.CTkButton(btn_frame, text="Reset", fg_color="#C62828", hover_color="#B71C1C", width=80, command=self.reset_ui).pack(side="left", padx=5)
+        
         self.txt_psd = ctk.CTkTextbox(self.tab_psd, height=150, state="disabled")
         self.txt_psd.pack(pady=5, fill="x")
         ctk.CTkButton(self.tab_psd, text="Convert All", fg_color="green", command=lambda: threading.Thread(target=self._process_psd, daemon=True).start()).pack(pady=10)
@@ -230,7 +268,12 @@ class ProMediaTool(ctk.CTk, BaseClass):
 
     def _setup_resize_tab(self):
         ctk.CTkLabel(self.tab_resize, text="Smart Resizer", font=("Arial", 14, "bold")).pack(pady=5)
-        ctk.CTkButton(self.tab_resize, text="Select Files", command=lambda: self.select_files("img")).pack()
+        
+        btn_frame = ctk.CTkFrame(self.tab_resize, fg_color="transparent")
+        btn_frame.pack(pady=5)
+        ctk.CTkButton(btn_frame, text="Select Files", command=lambda: self.select_files("img")).pack(side="left", padx=5)
+        ctk.CTkButton(btn_frame, text="Reset", fg_color="#C62828", hover_color="#B71C1C", width=80, command=self.reset_ui).pack(side="left", padx=5)
+        
         self.txt_res = ctk.CTkTextbox(self.tab_resize, height=100, state="disabled")
         self.txt_res.pack(pady=5, fill="x")
         self.res_var = ctk.StringVar(value="286x410")
@@ -246,6 +289,7 @@ class ProMediaTool(ctk.CTk, BaseClass):
                 out_dir = os.path.join(os.path.dirname(f), "Resized_Output")
                 os.makedirs(out_dir, exist_ok=True)
                 img = Image.open(f)
+                # PHOTOSHOP: Lanczos is the best filter for downsizing (matches Bicubic Sharper)
                 img = img.resize((w, h), Image.Resampling.LANCZOS)
                 out_path = os.path.join(out_dir, os.path.basename(os.path.splitext(f)[0] + f"_{self.res_var.get()}.jpg"))
                 self.save_image_pro(img, out_path, img.info.get('dpi', (72,72)))
@@ -255,7 +299,12 @@ class ProMediaTool(ctk.CTk, BaseClass):
 
     def _setup_banner_tab(self):
         ctk.CTkLabel(self.tab_banner, text="HD Banner", font=("Arial", 14, "bold")).pack(pady=5)
-        ctk.CTkButton(self.tab_banner, text="Select Files", command=lambda: self.select_files("img")).pack()
+        
+        btn_frame = ctk.CTkFrame(self.tab_banner, fg_color="transparent")
+        btn_frame.pack(pady=5)
+        ctk.CTkButton(btn_frame, text="Select Files", command=lambda: self.select_files("img")).pack(side="left", padx=5)
+        ctk.CTkButton(btn_frame, text="Reset", fg_color="#C62828", hover_color="#B71C1C", width=80, command=self.reset_ui).pack(side="left", padx=5)
+        
         self.txt_ban = ctk.CTkTextbox(self.tab_banner, height=60, state="disabled")
         self.txt_ban.pack(pady=5, fill="x")
         self.entry_title = ctk.CTkEntry(self.tab_banner, placeholder_text="Title Name (Optional)")
@@ -280,12 +329,16 @@ class ProMediaTool(ctk.CTk, BaseClass):
                 os.makedirs(out_dir, exist_ok=True)
                 img = Image.open(fpath)
                 dpi = img.info.get('dpi', (72, 72))
+                
+                # PHOTOSHOP LOGIC: Lanczos Resize + Unsharp Mask
                 img_res = img.resize((286, 371), Image.Resampling.LANCZOS)
                 img_res = img_res.filter(ImageFilter.UnsharpMask(radius=0.8, percent=110, threshold=3))
+                
                 canvas = Image.new("RGB", (286, 410), (255, 255, 255))
                 canvas.paste(img_res, (0, 0))
                 banner = Image.open(tpl_path).convert("RGBA").resize((286, 410), Image.Resampling.LANCZOS)
                 canvas.paste(banner, (0, 0), mask=banner)
+                
                 suffix = "2DayBanner_286x410" if self.ban_type.get() == "2day" else "3DayBanner_286x410"
                 if user_title:
                     fname = f"{user_title}_{i+1:02d}_{suffix}.jpg" if len(self.file_list) > 1 else f"{user_title}_{suffix}.jpg"
