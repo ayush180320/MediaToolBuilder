@@ -2,7 +2,7 @@
 APPLICATION SECURITY MANIFEST & AUDIT LOG
 -----------------------------------------
 App Name:       Media Workflow Studio Pro
-Version:        3.8 (Reset Logic Fix + Scalable Window)
+Version:        4.2 (Smart Auto-Suffix Logic)
 Author:         Ayush Singhal
 Company:        Deluxe Media
 Purpose:        Local image manipulation.
@@ -40,13 +40,11 @@ class ProMediaTool(ctk.CTk, BaseClass):
     def __init__(self):
         super().__init__()
 
-        self.title("Media Workflow Studio Pro v3.8")
+        self.title("Media Workflow Studio Pro v4.2")
+        # Fixed Height: 650px to ensure buttons don't get cut off
+        self.geometry("1100x650")
+        self.minsize(1100, 650)
         
-        # FIXED: Slightly smaller height to accommodate Windows 125% Scaling
-        self.geometry("1100x620")
-        self.minsize(1100, 620) # Prevents it from being squished
-        self.resizable(True, True) # Allows maximizing if needed
-
         self.bind("<Control-Alt-a>", self._reveal_author)
         
         # --- Layout ---
@@ -58,7 +56,6 @@ class ProMediaTool(ctk.CTk, BaseClass):
         self.left_frame = ctk.CTkFrame(self, corner_radius=0)
         self.left_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
 
-        # Tab Switching Logic
         self.tab_view = ctk.CTkTabview(self.left_frame, command=self.on_tab_switch)
         self.tab_view.pack(fill="both", expand=True, padx=10, pady=10)
 
@@ -108,54 +105,44 @@ class ProMediaTool(ctk.CTk, BaseClass):
         except: base_path = os.path.abspath(".")
         return os.path.join(base_path, relative_path)
 
-    # --- RESET ENGINE (FIXED) ---
+    # --- RESET ENGINE ---
     def reset_ui(self):
         """Completely clears state to allow fresh inputs"""
-        # 1. Clear Data
         self.file_list = []
         self.file_names = []
         self.current_preview_path = None
         
-        # 2. Reset Selector
-        self.preview_selector.configure(state="normal") # Must be normal to set value
+        self.preview_selector.configure(state="normal") 
         self.preview_selector.set("No Files Selected")
-        self.preview_selector.configure(values=["No Files Selected"]) # Reset list
+        self.preview_selector.configure(values=["No Files Selected"])
         self.preview_selector.configure(state="disabled")
 
-        # 3. Reset Preview Image
         self.lbl_preview_img.configure(image=None, text="[Drag Files Here]")
         
-        # 4. Reset Info Box
         self.info_box.configure(state="normal")
         self.info_box.delete("0.0", "end")
         self.info_box.insert("0.0", "Waiting for selection...")
         self.info_box.configure(state="disabled")
         
-        # 5. Clear Text Inputs
         for txt in [self.txt_psd, self.txt_res, self.txt_ban]:
             txt.configure(state="normal")
             txt.delete("0.0", "end")
             txt.configure(state="disabled")
-            
-        # 6. Clear Entry
-        self.entry_title.delete(0, "end")
 
     def on_tab_switch(self):
         self.reset_ui()
 
-    # --- INPUT HANDLING (FIXED) ---
+    # --- INPUT HANDLING ---
     def handle_files_input(self, files):
         if not files: return
-        
-        # Always overwrite list on new drop/select
         self.file_list = files
         self.file_names = [os.path.basename(f) for f in files]
         
-        # Update Selector
+        # Wake up selector
         self.preview_selector.configure(state="normal", values=self.file_names)
         self.preview_selector.set(self.file_names[0])
         
-        # Update Text Box
+        # Update text box
         active = self.tab_view.get()
         target_box = self.txt_psd if active == "PSD Bulk Converter" else (self.txt_res if active == "Smart Resizer" else self.txt_ban)
         
@@ -164,20 +151,17 @@ class ProMediaTool(ctk.CTk, BaseClass):
         for f in self.file_names: target_box.insert("end", f"{f}\n")
         target_box.configure(state="disabled")
 
-        # Force Preview Update
+        # Force Preview
         self.current_preview_path = self.file_list[0]
-        
-        # Run preview in thread to prevent UI freeze on large PSDs
-        # (This was also causing "sticky" UI state sometimes)
-        self.refresh_preview()
+        self.update_preview_logic()
         self.update_file_info(self.current_preview_path)
 
     def on_selector_change(self, selected_filename):
+        if selected_filename == "No Files Selected" or not self.file_list: return
         try:
-            if selected_filename == "No Files Selected": return
             index = self.file_names.index(selected_filename)
             self.current_preview_path = self.file_list[index]
-            self.refresh_preview()
+            self.update_preview_logic()
             self.update_file_info(self.current_preview_path)
         except ValueError: pass
 
@@ -191,11 +175,9 @@ class ProMediaTool(ctk.CTk, BaseClass):
         self.handle_files_input(files)
 
     def select_files(self, mode):
-        # Clears previous selection implicitly by overwriting self.file_list in handle_files_input
         ft = [("Photoshop", "*.psd")] if mode == "psd" else [("Images", "*.jpg;*.png;*.jpeg")]
         files = filedialog.askopenfilenames(filetypes=ft)
-        if files: # Only process if user actually picked something
-            self.handle_files_input(files)
+        if files: self.handle_files_input(files)
 
     # --- FILE INFO ENGINE ---
     def update_file_info(self, filepath):
@@ -220,7 +202,7 @@ class ProMediaTool(ctk.CTk, BaseClass):
         self.info_box.configure(state="disabled")
 
     # --- PREVIEW ENGINE ---
-    def refresh_preview(self):
+    def update_preview_logic(self):
         if not self.current_preview_path: return
         try:
             if self.current_preview_path.lower().endswith(".psd"):
@@ -247,6 +229,9 @@ class ProMediaTool(ctk.CTk, BaseClass):
         except Exception as e:
             self.lbl_preview_img.configure(image="", text=f"Preview Failed\n{str(e)}")
 
+    def refresh_preview(self):
+        self.update_preview_logic()
+
     def save_image_pro(self, img, path, dpi=(72,72)):
         if img.mode in ("RGBA", "P", "CMYK"): img = img.convert("RGB")
         img.save(path, "JPEG", quality=100, subsampling=0, dpi=dpi)
@@ -254,12 +239,10 @@ class ProMediaTool(ctk.CTk, BaseClass):
     # --- TABS ---
     def _setup_psd_tab(self):
         ctk.CTkLabel(self.tab_psd, text="PSD Bulk Converter", font=("Arial", 14, "bold")).pack(pady=5)
-        
         btn_frame = ctk.CTkFrame(self.tab_psd, fg_color="transparent")
         btn_frame.pack(pady=5)
         ctk.CTkButton(btn_frame, text="Select Files", command=lambda: self.select_files("psd")).pack(side="left", padx=5)
         ctk.CTkButton(btn_frame, text="Reset", fg_color="#C62828", hover_color="#B71C1C", width=80, command=self.reset_ui).pack(side="left", padx=5)
-        
         self.txt_psd = ctk.CTkTextbox(self.tab_psd, height=150, state="disabled")
         self.txt_psd.pack(pady=5, fill="x")
         ctk.CTkButton(self.tab_psd, text="Convert All", fg_color="green", command=lambda: threading.Thread(target=self._process_psd, daemon=True).start()).pack(pady=10)
@@ -280,12 +263,10 @@ class ProMediaTool(ctk.CTk, BaseClass):
 
     def _setup_resize_tab(self):
         ctk.CTkLabel(self.tab_resize, text="Smart Resizer", font=("Arial", 14, "bold")).pack(pady=5)
-        
         btn_frame = ctk.CTkFrame(self.tab_resize, fg_color="transparent")
         btn_frame.pack(pady=5)
         ctk.CTkButton(btn_frame, text="Select Files", command=lambda: self.select_files("img")).pack(side="left", padx=5)
         ctk.CTkButton(btn_frame, text="Reset", fg_color="#C62828", hover_color="#B71C1C", width=80, command=self.reset_ui).pack(side="left", padx=5)
-        
         self.txt_res = ctk.CTkTextbox(self.tab_resize, height=100, state="disabled")
         self.txt_res.pack(pady=5, fill="x")
         self.res_var = ctk.StringVar(value="286x410")
@@ -309,7 +290,7 @@ class ProMediaTool(ctk.CTk, BaseClass):
         messagebox.showinfo("Success", f"Resized {count} files.")
 
     def _setup_banner_tab(self):
-        ctk.CTkLabel(self.tab_banner, text="HD Banner", font=("Arial", 14, "bold")).pack(pady=5)
+        ctk.CTkLabel(self.tab_banner, text="HD Banner & Batch Rename", font=("Arial", 14, "bold")).pack(pady=5)
         
         btn_frame = ctk.CTkFrame(self.tab_banner, fg_color="transparent")
         btn_frame.pack(pady=5)
@@ -318,13 +299,21 @@ class ProMediaTool(ctk.CTk, BaseClass):
         
         self.txt_ban = ctk.CTkTextbox(self.tab_banner, height=60, state="disabled")
         self.txt_ban.pack(pady=5, fill="x")
-        self.entry_title = ctk.CTkEntry(self.tab_banner, placeholder_text="Title Name (Optional)")
-        self.entry_title.pack(fill="x", pady=5)
+        
+        # --- BATCH RENAME UI (Streamlined) ---
+        rename_frame = ctk.CTkFrame(self.tab_banner, fg_color="#2b2b2b")
+        rename_frame.pack(fill="x", pady=10, padx=10)
+        
+        # Explanatory Label
+        ctk.CTkLabel(rename_frame, text="Naming Convention:", font=("Arial", 11, "bold"), text_color="gray").pack(pady=(5,0))
+        ctk.CTkLabel(rename_frame, text="{OriginalName}_{BannerType}_{286x410}.jpg", font=("Courier", 12, "bold"), text_color="#00E5FF").pack(pady=(0,5))
+
         self.ban_type = ctk.StringVar(value="2day")
-        r = ctk.CTkFrame(self.tab_banner); r.pack()
-        ctk.CTkRadioButton(r, text="2-Day", variable=self.ban_type, value="2day", command=self.refresh_preview).pack(side="left", padx=5)
-        ctk.CTkRadioButton(r, text="3-Day", variable=self.ban_type, value="3day", command=self.refresh_preview).pack(side="left", padx=5)
-        ctk.CTkButton(self.tab_banner, text="Process All", fg_color="green", command=lambda: threading.Thread(target=self._process_ban, daemon=True).start()).pack(pady=10)
+        r = ctk.CTkFrame(self.tab_banner); r.pack(pady=5)
+        ctk.CTkRadioButton(r, text="2-Day Banner", variable=self.ban_type, value="2day", command=self.refresh_preview).pack(side="left", padx=10)
+        ctk.CTkRadioButton(r, text="3-Day Banner", variable=self.ban_type, value="3day", command=self.refresh_preview).pack(side="left", padx=10)
+        
+        ctk.CTkButton(self.tab_banner, text="Process Batch", fg_color="green", command=lambda: threading.Thread(target=self._process_ban, daemon=True).start()).pack(pady=10)
 
     def _process_ban(self):
         if not self.file_list: return messagebox.showwarning("Error", "No files selected")
@@ -333,28 +322,36 @@ class ProMediaTool(ctk.CTk, BaseClass):
         if not os.path.exists(tpl_path): return messagebox.showerror("Error", f"Missing {tpl}")
         
         count = 0
-        user_title = self.entry_title.get().strip()
-        for i, fpath in enumerate(self.file_list):
+        for fpath in self.file_list:
             try:
                 out_dir = os.path.join(os.path.dirname(fpath), "Banner_Output")
                 os.makedirs(out_dir, exist_ok=True)
+                
+                # PROCESSING
                 img = Image.open(fpath)
                 dpi = img.info.get('dpi', (72, 72))
                 img_res = img.resize((286, 371), Image.Resampling.LANCZOS)
                 img_res = img_res.filter(ImageFilter.UnsharpMask(radius=0.8, percent=110, threshold=3))
+                
                 canvas = Image.new("RGB", (286, 410), (255, 255, 255))
                 canvas.paste(img_res, (0, 0))
                 banner = Image.open(tpl_path).convert("RGBA").resize((286, 410), Image.Resampling.LANCZOS)
                 canvas.paste(banner, (0, 0), mask=banner)
+                
+                # RENAMING LOGIC (Preserves Individual Filenames)
+                # 1. Get original filename without extension (e.g. "Matrix")
+                base_name = os.path.splitext(os.path.basename(fpath))[0]
+                
+                # 2. Define Suffix
                 suffix = "2DayBanner_286x410" if self.ban_type.get() == "2day" else "3DayBanner_286x410"
-                if user_title:
-                    fname = f"{user_title}_{i+1:02d}_{suffix}.jpg" if len(self.file_list) > 1 else f"{user_title}_{suffix}.jpg"
-                else:
-                    fname = os.path.splitext(os.path.basename(fpath))[0] + f"_{suffix}.jpg"
+                
+                # 3. Combine -> "Matrix_2DayBanner_286x410.jpg"
+                fname = f"{base_name}_{suffix}.jpg"
+                    
                 self.save_image_pro(canvas, os.path.join(out_dir, fname), dpi)
                 count += 1
             except Exception as e: print(e)
-        messagebox.showinfo("Success", f"Processed {count} Banners.")
+        messagebox.showinfo("Success", f"Processed {count} files.")
 
     def _reveal_author(self, event=None):
         messagebox.showinfo("Credits", "Code by Ayush Singhal | Deluxe Media")
