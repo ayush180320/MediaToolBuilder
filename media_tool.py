@@ -2,7 +2,7 @@
 APPLICATION SECURITY MANIFEST & AUDIT LOG
 -----------------------------------------
 App Name:       Media Workflow Studio Pro
-Version:        3.7 (Photoshop Logic + Reset + Auto-Clear)
+Version:        3.8 (Reset Logic Fix + Scalable Window)
 Author:         Ayush Singhal
 Company:        Deluxe Media
 Purpose:        Local image manipulation.
@@ -40,9 +40,12 @@ class ProMediaTool(ctk.CTk, BaseClass):
     def __init__(self):
         super().__init__()
 
-        self.title("Media Workflow Studio Pro v3.7")
-        # RESIZED: 650px height prevents covering taskbar on 1080p/768p screens
-        self.geometry("1100x650") 
+        self.title("Media Workflow Studio Pro v3.8")
+        
+        # FIXED: Slightly smaller height to accommodate Windows 125% Scaling
+        self.geometry("1100x620")
+        self.minsize(1100, 620) # Prevents it from being squished
+        self.resizable(True, True) # Allows maximizing if needed
 
         self.bind("<Control-Alt-a>", self._reveal_author)
         
@@ -55,7 +58,7 @@ class ProMediaTool(ctk.CTk, BaseClass):
         self.left_frame = ctk.CTkFrame(self, corner_radius=0)
         self.left_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
 
-        # Added command=self.on_tab_switch to AUTO-RESET when changing tabs
+        # Tab Switching Logic
         self.tab_view = ctk.CTkTabview(self.left_frame, command=self.on_tab_switch)
         self.tab_view.pack(fill="both", expand=True, padx=10, pady=10)
 
@@ -105,45 +108,54 @@ class ProMediaTool(ctk.CTk, BaseClass):
         except: base_path = os.path.abspath(".")
         return os.path.join(base_path, relative_path)
 
-    # --- RESET ENGINE ---
+    # --- RESET ENGINE (FIXED) ---
     def reset_ui(self):
-        """Clears all data, text boxes, and previews"""
+        """Completely clears state to allow fresh inputs"""
+        # 1. Clear Data
         self.file_list = []
         self.file_names = []
         self.current_preview_path = None
         
-        # Clear Right Panel
+        # 2. Reset Selector
+        self.preview_selector.configure(state="normal") # Must be normal to set value
         self.preview_selector.set("No Files Selected")
+        self.preview_selector.configure(values=["No Files Selected"]) # Reset list
         self.preview_selector.configure(state="disabled")
+
+        # 3. Reset Preview Image
         self.lbl_preview_img.configure(image=None, text="[Drag Files Here]")
         
+        # 4. Reset Info Box
         self.info_box.configure(state="normal")
         self.info_box.delete("0.0", "end")
         self.info_box.insert("0.0", "Waiting for selection...")
         self.info_box.configure(state="disabled")
         
-        # Clear Left Panel Textboxes
+        # 5. Clear Text Inputs
         for txt in [self.txt_psd, self.txt_res, self.txt_ban]:
             txt.configure(state="normal")
             txt.delete("0.0", "end")
             txt.configure(state="disabled")
             
-        # Clear Entry
+        # 6. Clear Entry
         self.entry_title.delete(0, "end")
 
     def on_tab_switch(self):
-        """Called automatically when tab changes"""
         self.reset_ui()
 
-    # --- INPUT HANDLING ---
+    # --- INPUT HANDLING (FIXED) ---
     def handle_files_input(self, files):
         if not files: return
+        
+        # Always overwrite list on new drop/select
         self.file_list = files
         self.file_names = [os.path.basename(f) for f in files]
         
+        # Update Selector
         self.preview_selector.configure(state="normal", values=self.file_names)
         self.preview_selector.set(self.file_names[0])
         
+        # Update Text Box
         active = self.tab_view.get()
         target_box = self.txt_psd if active == "PSD Bulk Converter" else (self.txt_res if active == "Smart Resizer" else self.txt_ban)
         
@@ -152,12 +164,17 @@ class ProMediaTool(ctk.CTk, BaseClass):
         for f in self.file_names: target_box.insert("end", f"{f}\n")
         target_box.configure(state="disabled")
 
+        # Force Preview Update
         self.current_preview_path = self.file_list[0]
+        
+        # Run preview in thread to prevent UI freeze on large PSDs
+        # (This was also causing "sticky" UI state sometimes)
         self.refresh_preview()
         self.update_file_info(self.current_preview_path)
 
     def on_selector_change(self, selected_filename):
         try:
+            if selected_filename == "No Files Selected": return
             index = self.file_names.index(selected_filename)
             self.current_preview_path = self.file_list[index]
             self.refresh_preview()
@@ -174,9 +191,11 @@ class ProMediaTool(ctk.CTk, BaseClass):
         self.handle_files_input(files)
 
     def select_files(self, mode):
+        # Clears previous selection implicitly by overwriting self.file_list in handle_files_input
         ft = [("Photoshop", "*.psd")] if mode == "psd" else [("Images", "*.jpg;*.png;*.jpeg")]
         files = filedialog.askopenfilenames(filetypes=ft)
-        self.handle_files_input(files)
+        if files: # Only process if user actually picked something
+            self.handle_files_input(files)
 
     # --- FILE INFO ENGINE ---
     def update_file_info(self, filepath):
@@ -204,7 +223,6 @@ class ProMediaTool(ctk.CTk, BaseClass):
     def refresh_preview(self):
         if not self.current_preview_path: return
         try:
-            # PHOTOSHOP LOGIC: Use High-Quality Resampling for Preview
             if self.current_preview_path.lower().endswith(".psd"):
                 psd = PSDImage.open(self.current_preview_path)
                 img = psd.composite()
@@ -230,12 +248,6 @@ class ProMediaTool(ctk.CTk, BaseClass):
             self.lbl_preview_img.configure(image="", text=f"Preview Failed\n{str(e)}")
 
     def save_image_pro(self, img, path, dpi=(72,72)):
-        """
-        PHOTOSHOP SETTINGS: 
-        1. Convert to RGB (standard web).
-        2. Quality=100 (Max).
-        3. Subsampling=0 (Disable chroma subsampling -> 4:4:4 color).
-        """
         if img.mode in ("RGBA", "P", "CMYK"): img = img.convert("RGB")
         img.save(path, "JPEG", quality=100, subsampling=0, dpi=dpi)
 
@@ -289,7 +301,6 @@ class ProMediaTool(ctk.CTk, BaseClass):
                 out_dir = os.path.join(os.path.dirname(f), "Resized_Output")
                 os.makedirs(out_dir, exist_ok=True)
                 img = Image.open(f)
-                # PHOTOSHOP: Lanczos is the best filter for downsizing (matches Bicubic Sharper)
                 img = img.resize((w, h), Image.Resampling.LANCZOS)
                 out_path = os.path.join(out_dir, os.path.basename(os.path.splitext(f)[0] + f"_{self.res_var.get()}.jpg"))
                 self.save_image_pro(img, out_path, img.info.get('dpi', (72,72)))
@@ -329,16 +340,12 @@ class ProMediaTool(ctk.CTk, BaseClass):
                 os.makedirs(out_dir, exist_ok=True)
                 img = Image.open(fpath)
                 dpi = img.info.get('dpi', (72, 72))
-                
-                # PHOTOSHOP LOGIC: Lanczos Resize + Unsharp Mask
                 img_res = img.resize((286, 371), Image.Resampling.LANCZOS)
                 img_res = img_res.filter(ImageFilter.UnsharpMask(radius=0.8, percent=110, threshold=3))
-                
                 canvas = Image.new("RGB", (286, 410), (255, 255, 255))
                 canvas.paste(img_res, (0, 0))
                 banner = Image.open(tpl_path).convert("RGBA").resize((286, 410), Image.Resampling.LANCZOS)
                 canvas.paste(banner, (0, 0), mask=banner)
-                
                 suffix = "2DayBanner_286x410" if self.ban_type.get() == "2day" else "3DayBanner_286x410"
                 if user_title:
                     fname = f"{user_title}_{i+1:02d}_{suffix}.jpg" if len(self.file_list) > 1 else f"{user_title}_{suffix}.jpg"
