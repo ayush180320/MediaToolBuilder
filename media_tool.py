@@ -1,30 +1,28 @@
 import sys
 import os
-import time
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-                             QLabel, QPushButton, QTabWidget, QTextEdit, QListWidget, 
-                             QLineEdit, QComboBox, QMessageBox, QFileDialog, QRadioButton, 
-                             QProgressBar, QFrame, QSizePolicy)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize, QMimeData
-from PyQt6.QtGui import QPixmap, QImage, QDragEnterEvent, QDropEvent, QIcon, QAction, QPalette, QColor
-from PIL import Image, ImageQt, ImageFilter
+                             QLabel, QPushButton, QTabWidget, QTextEdit, QLineEdit, 
+                             QComboBox, QMessageBox, QFileDialog, QRadioButton, 
+                             QProgressBar, QFrame, QSizePolicy, QGroupBox)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize
+from PyQt6.QtGui import QPixmap, QImage, QDragEnterEvent, QDropEvent, QColor, QPalette, QFont
+from PIL import Image, ImageFilter
 from psd_tools import PSDImage
 
-# --- WORKER THREAD (Non-Freezing UI) ---
+#Path to assets (Banner overlays)
+ASSET_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# --- WORKER THREAD (Background Processing) ---
 class BatchProcessor(QThread):
-    """
-    Runs heavy image processing in the background so the UI never freezes.
-    """
     progress_signal = pyqtSignal(int)
     log_signal = pyqtSignal(str)
     finished_signal = pyqtSignal(str)
 
-    def __init__(self, mode, file_list, settings, custom_names):
+    def __init__(self, mode, file_list, settings):
         super().__init__()
         self.mode = mode
         self.file_list = file_list
         self.settings = settings
-        self.custom_names = custom_names
         self._is_running = True
 
     def run(self):
@@ -36,92 +34,84 @@ class BatchProcessor(QThread):
             
             try:
                 base_name = os.path.basename(f_path)
+                name_only = os.path.splitext(base_name)[0]
                 self.log_signal.emit(f"Processing: {base_name}...")
                 
-                # 1. Open Image & Capture Metadata
+                # 1. Open & Capture Metadata
                 if f_path.lower().endswith(".psd"):
                     psd = PSDImage.open(f_path)
                     img = psd.composite()
-                    # PSDs often don't store DPI in standard PIL info, try to default to 72
-                    original_dpi = (72, 72) 
+                    original_dpi = (72, 72)
                 else:
                     img = Image.open(f_path)
-                    original_dpi = img.info.get('dpi', (72, 72)) # CAPTURE ORIGINAL DPI
+                    original_dpi = img.info.get('dpi', (72, 72))
 
-                # 2. Determine Output Path
+                # 2. Operations & Naming
                 out_dir = os.path.join(os.path.dirname(f_path), "Processed_Output")
                 os.makedirs(out_dir, exist_ok=True)
-                
-                # 3. Apply Operations
-                final_name = self.custom_names.get(f_path, os.path.splitext(base_name)[0])
-                
+                final_name = name_only 
+
+                # --- MODE: RESIZE ---
                 if self.mode == "resize":
                     w, h = map(int, self.settings['res'].split('x'))
                     img = img.resize((w, h), Image.Resampling.LANCZOS)
-                    final_name += f"_{w}x{h}"
+                    final_name = f"{name_only}_{w}x{h}"
 
+                # --- MODE: BANNER ---
                 elif self.mode == "banner":
-                    # HD Banner Logic
+                    # Use Custom Name if provided, else original
+                    custom_name = self.settings.get('custom_name', '').strip()
+                    base_for_banner = custom_name if custom_name else name_only
+                    
                     img = img.resize((286, 371), Image.Resampling.LANCZOS)
                     img = img.filter(ImageFilter.UnsharpMask(radius=0.8, percent=110, threshold=3))
                     
                     canvas = Image.new("RGB", (286, 410), (255, 255, 255))
                     canvas.paste(img, (0,0))
                     
-                    # Overlay
                     tpl_name = "banner_2day.png" if self.settings['ban_type'] == "2day" else "banner_3day.png"
-                    # Look for assets in the same directory as the script
-                    tpl_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), tpl_name)
+                    tpl_path = os.path.join(ASSET_DIR, tpl_name)
                     
                     if os.path.exists(tpl_path):
                         ovl = Image.open(tpl_path).convert("RGBA").resize((286, 410), Image.Resampling.LANCZOS)
                         canvas.paste(ovl, (0,0), mask=ovl)
                         img = canvas
-                    else:
-                        self.log_signal.emit(f"Warning: Overlay {tpl_name} not found.")
-
+                    
                     suf = "_2DayBanner" if self.settings['ban_type'] == "2day" else "_3DayBanner"
-                    final_name += suf
+                    final_name = f"{base_for_banner}{suf}"
 
-                # 4. Save with ORIGINAL DPI
+                # 3. Save
                 save_path = os.path.join(out_dir, final_name + ".jpg")
                 if img.mode in ("RGBA", "P"): img = img.convert("RGB")
-                
-                # --- THE INDUSTRY STANDARD SAVE ---
                 img.save(save_path, "JPEG", quality=100, subsampling=0, dpi=original_dpi)
                 
                 count += 1
-                progress_pct = int((index + 1) / total * 100)
-                self.progress_signal.emit(progress_pct)
+                self.progress_signal.emit(int((index + 1) / total * 100))
 
             except Exception as e:
-                self.log_signal.emit(f"Error on {base_name}: {str(e)}")
+                self.log_signal.emit(f"Error: {str(e)}")
 
-        self.finished_signal.emit(f"Batch Complete. Processed {count}/{total} files.")
+        self.finished_signal.emit(f"Batch Complete. {count}/{total} files processed.")
 
-# --- CUSTOM DRAG-DROP WIDGET ---
+# --- CUSTOM PREVIEW WIDGET ---
 class DropZone(QLabel):
     def __init__(self, parent_app):
         super().__init__()
         self.parent_app = parent_app
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setText("\n\nDRAG & DROP FILES HERE\n\n(Supported: JPG, PNG, PSD)\n\n")
+        self.setText("\n\nDRAG FILES HERE\n\n")
         self.setStyleSheet("""
             QLabel {
                 border: 2px dashed #444;
-                border-radius: 10px;
-                color: #666;
+                border-radius: 8px;
+                color: #555;
                 font-size: 14px;
-                background-color: #1e1e1e;
+                background-color: #1a1a1a;
             }
-            QLabel:hover {
-                border-color: #00E5FF;
-                color: #00E5FF;
-                background-color: #252525;
-            }
+            QLabel:hover { border-color: #0078d7; color: #0078d7; background-color: #202020; }
         """)
         self.setAcceptDrops(True)
-        self.setMinimumSize(300, 400)
+        self.setMinimumSize(350, 450)
 
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls(): event.accept()
@@ -131,273 +121,255 @@ class DropZone(QLabel):
         files = [u.toLocalFile() for u in event.mimeData().urls()]
         self.parent_app.load_files(files)
 
-# --- MAIN APPLICATION ---
+# --- MAIN WINDOW ---
 class MediaStudioPro(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Media Workflow Studio Pro v10 (Industrial Edition)")
-        self.resize(1200, 800)
-        self.setup_ui_theme()
+        self.setWindowTitle("Media Workflow Studio Pro v11")
+        self.resize(1150, 780)
+        self.setup_theme()
 
-        # Data
         self.files = []
-        self.custom_names = {}
-        self.current_preview = None
-        
-        # --- UI LAYOUT ---
+        self.current_preview_path = None
+
+        # --- MAIN LAYOUT ---
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
-        self.main_layout = QHBoxLayout(main_widget)
-        self.main_layout.setContentsMargins(20, 20, 20, 20)
-        self.main_layout.setSpacing(20)
+        main_layout = QHBoxLayout(main_widget)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(25)
 
-        # === LEFT COLUMN (CONTROLS) ===
+        # ================= LEFT PANEL (CONTROLS) =================
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
-        left_panel.setFixedWidth(400)
-        self.main_layout.addWidget(left_panel)
+        left_panel.setFixedWidth(380)
+        main_layout.addWidget(left_panel)
 
-        # Tabs
+        # 1. Add Files Button
+        btn_add = QPushButton("  + Add Files  ")
+        btn_add.setFixedHeight(45)
+        btn_add.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        btn_add.setStyleSheet("""
+            QPushButton { background-color: #0078d7; color: white; border-radius: 6px; }
+            QPushButton:hover { background-color: #0063b1; }
+        """)
+        btn_add.clicked.connect(self.open_file_dialog)
+        left_layout.addWidget(btn_add)
+        
+        left_layout.addSpacing(10)
+
+        # 2. Tabs
         self.tabs = QTabWidget()
         self.setup_tabs()
         left_layout.addWidget(self.tabs)
-
-        # Rename Section
-        rename_box = QFrame()
-        rename_box.setStyleSheet("background-color: #2b2b2b; border-radius: 8px; padding: 10px;")
-        r_layout = QVBoxLayout(rename_box)
         
-        r_layout.addWidget(QLabel("<b>RENAME FILE</b>"))
-        self.lbl_target = QLabel("No file selected")
-        self.lbl_target.setStyleSheet("color: #888;")
-        r_layout.addWidget(self.lbl_target)
-        
-        self.entry_name = QLineEdit()
-        self.entry_name.setPlaceholderText("Enter new filename...")
-        self.entry_name.textChanged.connect(self.update_output_preview)
-        r_layout.addWidget(self.entry_name)
-        
-        self.lbl_output_preview = QLabel("Output: ...")
-        self.lbl_output_preview.setStyleSheet("color: #00E5FF; font-family: Consolas; margin-top: 5px;")
-        r_layout.addWidget(self.lbl_output_preview)
-        
-        left_layout.addWidget(rename_box)
-        
-        # Progress Bar
+        # 3. Progress & Reset
+        left_layout.addStretch()
         self.progress = QProgressBar()
-        self.progress.setStyleSheet("QProgressBar { border: 0px; border-radius: 4px; background: #333; text-align: center; } QProgressBar::chunk { background: #00E5FF; }")
+        self.progress.setStyleSheet("QProgressBar { border: 0px; height: 6px; background: #333; } QProgressBar::chunk { background: #0078d7; }")
         left_layout.addWidget(self.progress)
+        
+        btn_reset = QPushButton("Reset Workspace")
+        btn_reset.setStyleSheet("background: transparent; color: #666; text-align: left;")
+        btn_reset.clicked.connect(self.reset_workspace)
+        left_layout.addWidget(btn_reset)
 
-        # === RIGHT COLUMN (PREVIEW) ===
+        # ================= RIGHT PANEL (PREVIEW) =================
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
-        self.main_layout.addWidget(right_panel)
+        main_layout.addWidget(right_panel)
 
-        right_layout.addWidget(QLabel("<h2>Live Preview</h2>"))
-
-        # File Selector
+        # Navigator
         self.combo_files = QComboBox()
-        self.combo_files.currentIndexChanged.connect(self.change_preview_image)
+        self.combo_files.setStyleSheet("padding: 8px; bg: #222;")
+        self.combo_files.currentIndexChanged.connect(self.on_file_select)
         right_layout.addWidget(self.combo_files)
 
-        # Drop Zone / Image Preview
+        # Preview Image
         self.drop_zone = DropZone(self)
-        right_layout.addWidget(self.drop_zone, alignment=Qt.AlignmentFlag.AlignCenter)
+        right_layout.addWidget(self.drop_zone, 1) # Expandable
 
-        # Info Console
-        self.console = QTextEdit()
-        self.console.setReadOnly(True)
-        self.console.setMaximumHeight(120)
-        self.console.setStyleSheet("background: #111; color: #00FF00; font-family: Consolas; border: 1px solid #333;")
-        self.console.setText("System Ready. Waiting for files...")
-        right_layout.addWidget(self.console)
+        # File Info Panel (Strictly Info)
+        info_group = QGroupBox("FILE INFORMATION")
+        info_group.setStyleSheet("QGroupBox { color: #888; border: 1px solid #333; margin-top: 10px; font-weight: bold; }")
+        ig_layout = QVBoxLayout(info_group)
         
-        # Reset Button (Floating bottom right)
-        btn_reset = QPushButton("Reset Workspace", self)
-        btn_reset.clicked.connect(self.reset_workspace)
-        btn_reset.setStyleSheet("background: #444; color: white; padding: 5px;")
-        right_layout.addWidget(btn_reset, alignment=Qt.AlignmentFlag.AlignRight)
+        self.info_box = QLabel("No file loaded.")
+        self.info_box.setFont(QFont("Consolas", 10))
+        self.info_box.setStyleSheet("color: #00E5FF; padding: 5px;")
+        ig_layout.addWidget(self.info_box)
+        
+        right_layout.addWidget(info_group)
 
-    def setup_ui_theme(self):
-        # Fusion Dark Theme
+    def setup_theme(self):
         self.setStyleSheet("""
             QMainWindow { background-color: #121212; }
-            QWidget { color: #e0e0e0; font-family: 'Segoe UI', sans-serif; font-size: 13px; }
-            QTabWidget::pane { border: 1px solid #444; background: #1e1e1e; }
-            QTabBar::tab { background: #2b2b2b; padding: 8px 20px; color: #aaa; }
-            QTabBar::tab:selected { background: #0078d7; color: white; }
-            QPushButton { background-color: #333; border: 1px solid #555; padding: 8px; border-radius: 4px; }
-            QPushButton:hover { background-color: #444; border-color: #00E5FF; }
-            QLineEdit, QComboBox { background: #222; border: 1px solid #444; padding: 5px; color: white; border-radius: 4px; }
-            QListWidget { background: #1e1e1e; border: 1px solid #333; }
+            QWidget { color: #e0e0e0; font-family: 'Segoe UI', sans-serif; }
+            QTabWidget::pane { border: 1px solid #333; background: #1e1e1e; border-radius: 6px; top: -1px; }
+            QTabBar::tab { background: #2b2b2b; padding: 10px 20px; color: #888; border-top-left-radius: 6px; border-top-right-radius: 6px; margin-right: 2px; }
+            QTabBar::tab:selected { background: #1e1e1e; color: white; border-bottom: 2px solid #0078d7; }
+            QLineEdit { background: #252525; border: 1px solid #444; padding: 8px; color: white; border-radius: 4px; }
+            QComboBox { background: #252525; border: 1px solid #444; padding: 5px; color: white; }
         """)
 
     def setup_tabs(self):
-        # PSD Tab
-        tab_psd = QWidget()
-        l_psd = QVBoxLayout(tab_psd)
-        btn_psd_run = QPushButton("Convert All PSDs to JPG")
-        btn_psd_run.setStyleSheet("background-color: #0078d7; font-weight: bold;")
-        btn_psd_run.clicked.connect(lambda: self.start_batch("psd"))
-        l_psd.addWidget(QLabel("Batch convert PSD files to high-quality JPGs."))
+        # --- TAB 1: PSD ---
+        t_psd = QWidget()
+        l_psd = QVBoxLayout(t_psd)
+        l_psd.setContentsMargins(20, 20, 20, 20)
+        l_psd.addWidget(QLabel("<b>PSD Bulk Converter</b>\n\nConverts PSDs to High-Res JPGs.\nOriginal filename is preserved."))
         l_psd.addStretch()
-        l_psd.addWidget(btn_psd_run)
-        self.tabs.addTab(tab_psd, "PSD Converter")
+        btn_psd = QPushButton("Start Conversion")
+        btn_psd.setFixedHeight(40)
+        btn_psd.setStyleSheet("background-color: #28a745; color: white; border-radius: 4px; font-weight: bold;")
+        btn_psd.clicked.connect(lambda: self.start_batch("psd"))
+        l_psd.addWidget(btn_psd)
+        self.tabs.addTab(t_psd, "PSD")
 
-        # Resize Tab
-        tab_res = QWidget()
-        l_res = QVBoxLayout(tab_res)
-        l_res.addWidget(QLabel("Target Resolution:"))
+        # --- TAB 2: RESIZE ---
+        t_res = QWidget()
+        l_res = QVBoxLayout(t_res)
+        l_res.setContentsMargins(20, 20, 20, 20)
+        l_res.addWidget(QLabel("<b>Smart Resizer</b>"))
+        
+        l_res.addWidget(QLabel("Target Dimension:"))
         self.combo_res = QComboBox()
         self.combo_res.addItems(["286x410", "960x1440", "1920x1080", "380x560"])
         l_res.addWidget(self.combo_res)
-        btn_res_run = QPushButton("Resize All")
-        btn_res_run.setStyleSheet("background-color: #0078d7; font-weight: bold;")
-        btn_res_run.clicked.connect(lambda: self.start_batch("resize"))
+        
         l_res.addStretch()
-        l_res.addWidget(btn_res_run)
-        self.tabs.addTab(tab_res, "Smart Resize")
+        btn_res = QPushButton("Resize All")
+        btn_res.setFixedHeight(40)
+        btn_res.setStyleSheet("background-color: #28a745; color: white; border-radius: 4px; font-weight: bold;")
+        btn_res.clicked.connect(lambda: self.start_batch("resize"))
+        l_res.addWidget(btn_res)
+        self.tabs.addTab(t_res, "Resize")
 
-        # Banner Tab
-        tab_ban = QWidget()
-        l_ban = QVBoxLayout(tab_ban)
-        self.group_ban = QRadioButton("2-Day Banner")
+        # --- TAB 3: BANNER (With Rename) ---
+        t_ban = QWidget()
+        l_ban = QVBoxLayout(t_ban)
+        l_ban.setContentsMargins(20, 20, 20, 20)
+        l_ban.addWidget(QLabel("<b>HD Banner & Rename</b>"))
+        
+        # Banner Type
+        self.rad_2day = QRadioButton("2-Day Banner")
         self.rad_3day = QRadioButton("3-Day Banner")
-        self.group_ban.setChecked(True)
-        self.group_ban.toggled.connect(lambda: self.refresh_preview_image(self.current_preview))
-        l_ban.addWidget(self.group_ban)
+        self.rad_2day.setChecked(True)
+        self.rad_2day.toggled.connect(self.refresh_preview)
+        l_ban.addWidget(self.rad_2day)
         l_ban.addWidget(self.rad_3day)
-        btn_ban_run = QPushButton("Generate Banners")
-        btn_ban_run.setStyleSheet("background-color: #0078d7; font-weight: bold;")
-        btn_ban_run.clicked.connect(lambda: self.start_batch("banner"))
+        
+        l_ban.addSpacing(15)
+        
+        # RENAME SECTION (Only here)
+        rename_frame = QFrame()
+        rename_frame.setStyleSheet("background: #252525; border-radius: 5px; border: 1px solid #333;")
+        rf_layout = QVBoxLayout(rename_frame)
+        rf_layout.addWidget(QLabel("RENAME FILE (Optional)"))
+        self.entry_rename = QLineEdit()
+        self.entry_rename.setPlaceholderText("Enter new name...")
+        self.entry_rename.textChanged.connect(self.refresh_preview) # Live update preview if needed
+        rf_layout.addWidget(self.entry_rename)
+        l_ban.addWidget(rename_frame)
+
         l_ban.addStretch()
-        l_ban.addWidget(btn_ban_run)
-        self.tabs.addTab(tab_ban, "HD Banner")
+        btn_ban = QPushButton("Generate Banners")
+        btn_ban.setFixedHeight(40)
+        btn_ban.setStyleSheet("background-color: #28a745; color: white; border-radius: 4px; font-weight: bold;")
+        btn_ban.clicked.connect(lambda: self.start_batch("banner"))
+        l_ban.addWidget(btn_ban)
+        self.tabs.addTab(t_ban, "HD Banner")
 
     # ================= LOGIC =================
+    def open_file_dialog(self):
+        files, _ = QFileDialog.getOpenFileNames(self, "Select Images", "", "Files (*.jpg *.png *.jpeg *.psd)")
+        if files: self.load_files(files)
 
-    def load_files(self, file_paths):
-        valid = [f for f in file_paths if os.path.isfile(f) and f.lower().endswith(('.jpg', '.jpeg', '.png', '.psd'))]
+    def load_files(self, paths):
+        valid = [f for f in paths if os.path.isfile(f)]
         if not valid: return
-
         self.files = valid
         self.combo_files.clear()
         self.combo_files.addItems([os.path.basename(f) for f in valid])
-        self.console.append(f"> Loaded {len(valid)} files.")
-        
-        if valid:
-            self.combo_files.setCurrentIndex(0)
+        self.combo_files.setCurrentIndex(0)
 
-    def change_preview_image(self, index):
-        if index < 0 or index >= len(self.files): return
-        self.current_preview = self.files[index]
-        self.refresh_preview_image(self.current_preview)
-        
-        # Update Rename UI
-        base = os.path.basename(self.current_preview)
-        self.lbl_target.setText(base)
-        stored_name = self.custom_names.get(self.current_preview, "")
-        self.entry_name.setText(stored_name)
-        self.update_output_preview(stored_name)
+    def on_file_select(self, index):
+        if index >= 0:
+            self.current_preview_path = self.files[index]
+            # Clear rename box when switching files (optional, keeps it clean)
+            self.entry_rename.clear() 
+            self.refresh_preview()
 
-    def refresh_preview_image(self, path):
-        if not path: return
+    def refresh_preview(self):
+        if not self.current_preview_path: return
         
-        # Show "Loading..."
-        self.drop_zone.setText("Loading Preview...")
-        QApplication.processEvents()
-
+        path = self.current_preview_path
+        
+        # 1. Update Info Box
         try:
-            # Load Image using Pillow (for PSD support)
+            size_mb = os.path.getsize(path) / (1024*1024)
+            img_tmp = Image.open(path)
+            dpi = img_tmp.info.get('dpi', (72,72))
+            info_txt = (f"File: {os.path.basename(path)}\n"
+                        f"Size: {size_mb:.2f} MB\n"
+                        f"Dim:  {img_tmp.width} x {img_tmp.height} px\n"
+                        f"DPI:  {int(dpi[0])}")
+            self.info_box.setText(info_txt)
+        except: 
+            self.info_box.setText("Reading info...")
+
+        # 2. Generate Image
+        try:
             if path.lower().endswith(".psd"):
                 img = PSDImage.open(path).composite()
             else:
                 img = Image.open(path)
 
-            # Apply Banner Preview if on Banner Tab
+            # If Banner Tab active -> Apply Banner Overlay Preview
             if self.tabs.currentIndex() == 2:
                 img = img.resize((286, 371), Image.Resampling.LANCZOS)
                 canvas = Image.new("RGB", (286, 410), (255, 255, 255))
                 canvas.paste(img, (0,0))
                 
-                tpl = "banner_2day.png" if self.group_ban.isChecked() else "banner_3day.png"
-                
-                # Check absolute path relative to script
-                tpl_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), tpl)
-
+                tpl = "banner_2day.png" if self.rad_2day.isChecked() else "banner_3day.png"
+                tpl_path = os.path.join(ASSET_DIR, tpl)
                 if os.path.exists(tpl_path):
                     ovl = Image.open(tpl_path).convert("RGBA").resize((286, 410), Image.Resampling.LANCZOS)
                     canvas.paste(ovl, (0,0), mask=ovl)
                     img = canvas
 
-            # Convert to Qt
             img.thumbnail((400, 500), Image.Resampling.LANCZOS)
-            if img.mode == "RGB": 
-                img = img.convert("RGBA")
+            if img.mode == "RGB": img = img.convert("RGBA")
             
             data = img.tobytes("raw", "RGBA")
             qim = QImage(data, img.size[0], img.size[1], QImage.Format.Format_RGBA8888)
-            pix = QPixmap.fromImage(qim)
-            
-            self.drop_zone.setPixmap(pix)
-            self.drop_zone.setText("") # Clear text
-            
-            # Update Info
-            dpi = img.info.get('dpi', (72,72))
-            self.console.append(f"> Previewing: {os.path.basename(path)} | DPI: {int(dpi[0])}")
-
+            self.drop_zone.setPixmap(QPixmap.fromImage(qim))
+            self.drop_zone.setText("")
         except Exception as e:
             self.drop_zone.setText("Preview Error")
-            self.console.append(f"Err: {str(e)}")
-
-    def update_output_preview(self, text):
-        if not self.current_preview: return
-        self.custom_names[self.current_preview] = text
-        suf = ""
-        if self.tabs.currentIndex() == 2:
-            suf = "_2DayBanner" if self.group_ban.isChecked() else "_3DayBanner"
-        elif self.tabs.currentIndex() == 1:
-            suf = f"_{self.combo_res.currentText()}"
-        
-        display_name = text if text else os.path.splitext(os.path.basename(self.current_preview))[0]
-        self.lbl_output_preview.setText(f"Output: {display_name}{suf}.jpg")
 
     def start_batch(self, mode):
-        if not self.files:
-            QMessageBox.warning(self, "No Files", "Please drop files first.")
-            return
-
+        if not self.files: return QMessageBox.warning(self, "Info", "Please add files first.")
+        
         settings = {
             "res": self.combo_res.currentText(),
-            "ban_type": "2day" if self.group_ban.isChecked() else "3day"
+            "ban_type": "2day" if self.rad_2day.isChecked() else "3day",
+            "custom_name": self.entry_rename.text() # Only used in banner mode
         }
 
-        # Disable UI
-        self.setEnabled(False)
-        self.progress.setValue(0)
-        
-        # Start Thread
-        self.worker = BatchProcessor(mode, self.files, settings, self.custom_names)
+        self.worker = BatchProcessor(mode, self.files, settings)
         self.worker.progress_signal.connect(self.progress.setValue)
-        self.worker.log_signal.connect(self.console.append)
-        self.worker.finished_signal.connect(self.batch_finished)
+        self.worker.finished_signal.connect(lambda m: QMessageBox.information(self, "Done", m))
         self.worker.start()
-
-    def batch_finished(self, msg):
-        self.setEnabled(True)
-        self.progress.setValue(100)
-        QMessageBox.information(self, "Complete", msg)
-        self.console.append(f"> {msg}")
+        self.progress.setValue(0)
 
     def reset_workspace(self):
         self.files = []
-        self.custom_names = {}
-        self.current_preview = None
         self.combo_files.clear()
-        self.entry_name.clear()
+        self.entry_rename.clear()
         self.drop_zone.setPixmap(QPixmap())
-        self.drop_zone.setText("\n\nDRAG & DROP FILES HERE\n\n(Supported: JPG, PNG, PSD)\n\n")
-        self.console.setText("Workspace Reset.")
+        self.drop_zone.setText("\n\nDRAG FILES HERE\n\n")
+        self.info_box.setText("No file loaded.")
         self.progress.setValue(0)
 
 if __name__ == "__main__":
