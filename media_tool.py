@@ -150,6 +150,10 @@ class SmartDropZone(QLabel):
         self._original_pixmap = QPixmap.fromImage(qimage)
         self.refresh_view()
 
+    def reset_view(self):
+        self._original_pixmap = None
+        self.setText("\n\nDROP IMAGES HERE\n\n")
+
     def refresh_view(self):
         if self._original_pixmap and not self._original_pixmap.isNull():
             scaled = self._original_pixmap.scaled(
@@ -280,11 +284,9 @@ class MediaStudioPro(QMainWindow):
         btn3 = QPushButton("Generate Banners"); btn3.setObjectName("ActionBtn"); btn3.setFixedHeight(40)
         btn3.clicked.connect(lambda: self.start_batch("banner")); l3.addWidget(btn3); self.tabs.addTab(t3, "Banner")
 
-    # --- RESTORED FUNCTION ---
     def open_file_dialog(self):
         files, _ = QFileDialog.getOpenFileNames(self, "Select Images", "", "Images (*.jpg *.png *.psd)")
         if files: self.load_files(files)
-    # -------------------------
 
     def load_files(self, paths):
         valid = [f for f in paths if os.path.isfile(f)]
@@ -308,9 +310,25 @@ class MediaStudioPro(QMainWindow):
             self.entry_rename.blockSignals(False)
             self.refresh_preview()
 
+    # --- FIX FOR TAB SWITCHING ---
     def on_tab_changed(self):
-        # Optional: Reset preview when switching tabs if desired
-        pass
+        """Resets the preview and selection when switching tabs."""
+        self.current_preview_path = None
+        
+        # Reset Dropdown to empty selection
+        self.combo_files.blockSignals(True)
+        self.combo_files.setCurrentIndex(-1)
+        self.combo_files.blockSignals(False)
+        
+        # Clear Renaming box
+        self.entry_rename.blockSignals(True)
+        self.entry_rename.clear()
+        self.entry_rename.blockSignals(False)
+        
+        # Reset Preview Image
+        self.drop_zone.reset_view()
+        self.lbl_info.setText("Select a file to preview.")
+    # -----------------------------
 
     def save_current_rename(self, text):
         if self.current_preview_path:
