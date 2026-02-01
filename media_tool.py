@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QLabel, QPushButton, QTabWidget, QLineEdit, QComboBox, 
                              QMessageBox, QFileDialog, QRadioButton, QProgressBar, 
                              QGroupBox, QStatusBar, QSplashScreen)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import (QPixmap, QImage, QDragEnterEvent, QDropEvent, QFont, 
                          QPainter, QPen, QColor, QKeySequence, QShortcut)
 from PIL import Image, ImageFilter
@@ -14,7 +14,8 @@ from psd_tools import PSDImage
 # --- CONFIGURATION ---
 ASSET_DIR = os.path.dirname(os.path.abspath(__file__))
 VERSION = "v15.0"
-# UPDATED CREDITS
+# NOTE: This name still appears in the 'About' popup (Ctrl+Alt+A), 
+# but I have removed it from the Splash Screen as requested.
 COPYRIGHT_OWNER = "Ayush Singhal" 
 YEAR = "2026"
 
@@ -210,7 +211,6 @@ class MediaStudioPro(QMainWindow):
     def show_ghost_copyright(self):
         msg = QMessageBox(self)
         msg.setWindowTitle("Credits")
-        # UPDATED COPYRIGHT INFO DISPLAY
         msg.setText(f"<h3>Media Studio Pro {VERSION}</h3>"
                     f"<p>Copyright &copy; {YEAR} <b>{COPYRIGHT_OWNER}</b></p>"
                     "<p>All rights reserved.<br>Licensed to Ayush Singhal.</p>")
@@ -254,7 +254,11 @@ class MediaStudioPro(QMainWindow):
         # RESIZE
         t2, l2 = create_tab("Smart Resizer", "Resize images to standard dimensions.")
         l2.addWidget(QLabel("Select Output Size:"))
-        self.combo_res = QComboBox(); self.combo_res.addItems(["286x410", "960x1440", "1920x1080", "Custom"])
+        
+        self.combo_res = QComboBox()
+        # --- ADDED NEW PRESETS HERE ---
+        self.combo_res.addItems(["286x410", "380x560", "800x1200", "960x1440", "1920x1080", "Custom"])
+        
         self.combo_res.currentTextChanged.connect(self.toggle_custom)
         l2.addWidget(self.combo_res)
         
@@ -372,7 +376,11 @@ if __name__ == "__main__":
         p = QPainter(splash_pix); p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setPen(QPen(QColor("#333"), 6)); p.drawRect(0, 0, 600, 350)
         p.setPen(QColor("#0078d7")); p.setFont(QFont("Segoe UI", 36, QFont.Weight.Bold)); p.drawText(splash_pix.rect(), Qt.AlignmentFlag.AlignCenter, "MEDIA STUDIO")
-        p.setPen(QColor("#666")); p.setFont(QFont("Consolas", 10)); p.drawText(0, 200, 600, 50, Qt.AlignmentFlag.AlignCenter, f"{VERSION} | {COPYRIGHT_OWNER}")
+        
+        # --- SPLASH SCREEN CHANGED HERE ---
+        # Removed "COPYRIGHT_OWNER" from the visual splash display. 
+        # It now reads "Industry Edition".
+        p.setPen(QColor("#666")); p.setFont(QFont("Consolas", 10)); p.drawText(0, 200, 600, 50, Qt.AlignmentFlag.AlignCenter, f"{VERSION} | Industry Edition")
         p.end()
 
     splash = QSplashScreen(splash_pix, Qt.WindowType.WindowStaysOnTopHint); splash.show()
@@ -381,6 +389,6 @@ if __name__ == "__main__":
         time.sleep(0.5); app.processEvents()
 
     window = MediaStudioPro()
-    window.showMaximized() # Auto Full Screen
+    window.showMaximized() 
     splash.finish(window)
     sys.exit(app.exec())
