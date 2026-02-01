@@ -23,11 +23,12 @@ class BatchProcessor(QThread):
     status_signal = pyqtSignal(str) 
     finished_signal = pyqtSignal(str)
 
-    def __init__(self, mode, file_list, settings):
+    def __init__(self, mode, file_list, settings, rename_map=None):
         super().__init__()
         self.mode = mode
         self.file_list = file_list
         self.settings = settings
+        self.rename_map = rename_map if rename_map else {} # Dictionary of {filepath: custom_name}
         self._is_running = True
 
     def run(self):
@@ -77,10 +78,15 @@ class BatchProcessor(QThread):
                     img = img.resize((w, h), Image.Resampling.LANCZOS)
                     final_name = f"{name_only}_{w}x{h}"
 
-                # --- BANNER LOGIC (UPDATED NAME CONVENTION) ---
+                # --- BANNER LOGIC (v16.0 Per-File Rename) ---
                 elif self.mode == "banner":
-                    custom_name = self.settings.get('custom_name', '').strip()
-                    base_for_banner = custom_name if custom_name else name_only
+                    # Check if user provided a specific name for THIS file
+                    user_custom_name = self.rename_map.get(f_path, "").strip()
+                    
+                    if user_custom_name:
+                        base_for_banner = user_custom_name
+                    else:
+                        base_for_banner = name_only
                     
                     img = img.resize((286, 371), Image.Resampling.LANCZOS)
                     img = img.filter(ImageFilter.UnsharpMask(radius=0.8, percent=110, threshold=3))
@@ -96,7 +102,6 @@ class BatchProcessor(QThread):
                         canvas.paste(ovl, (0,0), mask=ovl)
                         img = canvas
                     
-                    # UPDATED: File naming convention
                     suf = "_2Day Banner" if self.settings['ban_type'] == "2day" else "_3Day Banner"
                     final_name = f"{base_for_banner}{suf}_286x410"
 
@@ -116,10 +121,6 @@ class BatchProcessor(QThread):
 
 # --- UI COMPONENTS ---
 class SmartDropZone(QLabel):
-    """
-    A Custom Label that automatically handles aspect-ratio scaling
-    whenever the window is resized or a new image is loaded.
-    """
     def __init__(self, parent_app):
         super().__init__()
         self.parent_app = parent_app
@@ -136,7 +137,7 @@ class SmartDropZone(QLabel):
         """)
         self.setAcceptDrops(True)
         self.setMinimumSize(350, 450)
-        self._original_pixmap = None  # Store the high-res original
+        self._original_pixmap = None 
 
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls(): event.accept()
@@ -147,14 +148,11 @@ class SmartDropZone(QLabel):
         self.parent_app.load_files(files)
 
     def set_image(self, qimage):
-        """ Store original image and trigger a refresh """
         self._original_pixmap = QPixmap.fromImage(qimage)
         self.refresh_view()
 
     def refresh_view(self):
-        """ Scales the stored pixmap to fit the current label size """
         if self._original_pixmap and not self._original_pixmap.isNull():
-            # Scale to fit (KeepAspectRatio)
             scaled = self._original_pixmap.scaled(
                 self.size(), 
                 Qt.AspectRatioMode.KeepAspectRatio, 
@@ -165,7 +163,6 @@ class SmartDropZone(QLabel):
             self.setText("\n\nDROP IMAGES HERE\n\n")
 
     def resizeEvent(self, event):
-        """ Auto-called when window resizes """
         self.refresh_view()
         super().resizeEvent(event)
 
@@ -181,6 +178,7 @@ class MediaStudioPro(QMainWindow):
         self.ghost_copy.activated.connect(self.show_ghost_copyright)
 
         self.files = []
+        self.file_renames = {} # v16.0: Dictionary to store per-file names
         self.current_preview_path = None
 
         main_widget = QWidget()
@@ -189,70 +187,35 @@ class MediaStudioPro(QMainWindow):
         main_layout.setContentsMargins(25, 25, 25, 25)
         main_layout.setSpacing(30)
 
-        # === LEFT COLUMN ===
-        left_panel = QWidget()
-        left_layout = QVBoxLayout(left_panel)
-        left_panel.setFixedWidth(400)
+        # LEFT
+        left_panel = QWidget(); left_layout = QVBoxLayout(left_panel); left_panel.setFixedWidth(400)
         main_layout.addWidget(left_panel)
-
-        lbl_head = QLabel("WORKFLOW TOOLS")
-        lbl_head.setStyleSheet("color: #666; font-weight: bold; letter-spacing: 1px;")
+        lbl_head = QLabel("WORKFLOW TOOLS"); lbl_head.setStyleSheet("color: #666; font-weight: bold;")
         left_layout.addWidget(lbl_head)
-
-        btn_add = QPushButton("Select Files from Disk")
-        btn_add.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_add.setFixedHeight(50)
-        btn_add.clicked.connect(self.open_file_dialog)
-        left_layout.addWidget(btn_add)
+        btn_add = QPushButton("Select Files from Disk"); btn_add.setFixedHeight(50)
+        btn_add.clicked.connect(self.open_file_dialog); left_layout.addWidget(btn_add); left_layout.addSpacing(15)
         
-        left_layout.addSpacing(15)
-
         self.tabs = QTabWidget()
         self.setup_tabs()
         self.tabs.currentChanged.connect(self.on_tab_changed)
         left_layout.addWidget(self.tabs)
-        
         left_layout.addStretch()
-
-        self.lbl_status = QLabel("Ready")
-        self.lbl_status.setStyleSheet("color: #888;")
+        
+        self.lbl_status = QLabel("Ready"); self.lbl_status.setStyleSheet("color: #888;")
         left_layout.addWidget(self.lbl_status)
-        
-        self.progress = QProgressBar()
-        self.progress.setTextVisible(False)
-        left_layout.addWidget(self.progress)
-        
-        btn_reset = QPushButton("Clear Workspace")
-        btn_reset.setObjectName("GhostBtn")
-        btn_reset.clicked.connect(self.reset_workspace)
-        left_layout.addWidget(btn_reset)
+        self.progress = QProgressBar(); self.progress.setTextVisible(False); left_layout.addWidget(self.progress)
+        btn_reset = QPushButton("Clear Workspace"); btn_reset.setObjectName("GhostBtn"); btn_reset.clicked.connect(self.reset_workspace); left_layout.addWidget(btn_reset)
 
-        # === RIGHT COLUMN ===
-        right_panel = QWidget()
-        right_layout = QVBoxLayout(right_panel)
-        main_layout.addWidget(right_panel)
-
-        nav_layout = QHBoxLayout()
-        nav_layout.addWidget(QLabel("PREVIEW:"))
-        self.combo_files = QComboBox()
-        self.combo_files.currentIndexChanged.connect(self.on_file_select)
-        nav_layout.addWidget(self.combo_files, 1)
-        right_layout.addLayout(nav_layout)
-
-        # UPDATED: Using SmartDropZone
-        self.drop_zone = SmartDropZone(self)
-        right_layout.addWidget(self.drop_zone, 1)
-
-        self.info_group = QGroupBox()
-        self.info_group.setStyleSheet("QGroupBox { border: 1px solid #333; border-radius: 8px; background: #1a1a1a; margin-top: 10px; }")
-        ig_layout = QVBoxLayout(self.info_group)
-        self.lbl_info = QLabel("No file selected.")
-        self.lbl_info.setStyleSheet("color: #00aaff; font-family: Consolas; font-size: 12px;")
-        ig_layout.addWidget(self.lbl_info)
-        right_layout.addWidget(self.info_group)
-
-        self.setStatusBar(QStatusBar(self))
-        self.statusBar().showMessage("System Ready")
+        # RIGHT
+        right_panel = QWidget(); right_layout = QVBoxLayout(right_panel); main_layout.addWidget(right_panel)
+        nav_layout = QHBoxLayout(); nav_layout.addWidget(QLabel("PREVIEW:"))
+        self.combo_files = QComboBox(); self.combo_files.currentIndexChanged.connect(self.on_file_select)
+        nav_layout.addWidget(self.combo_files, 1); right_layout.addLayout(nav_layout)
+        self.drop_zone = SmartDropZone(self); right_layout.addWidget(self.drop_zone, 1)
+        self.info_group = QGroupBox(); self.info_group.setStyleSheet("QGroupBox { border: 1px solid #333; border-radius: 8px; background: #1a1a1a; margin-top: 10px; }")
+        ig_layout = QVBoxLayout(self.info_group); self.lbl_info = QLabel("No file selected."); self.lbl_info.setStyleSheet("color: #00aaff; font-family: Consolas; font-size: 12px;")
+        ig_layout.addWidget(self.lbl_info); right_layout.addWidget(self.info_group)
+        self.setStatusBar(QStatusBar(self)); self.statusBar().showMessage("System Ready")
 
     def show_ghost_copyright(self):
         msg = QMessageBox(self)
@@ -281,85 +244,49 @@ class MediaStudioPro(QMainWindow):
         """)
 
     def setup_tabs(self):
-        def create_tab(title, desc):
-            w = QWidget(); l = QVBoxLayout(w)
-            l.setContentsMargins(20, 25, 20, 25)
-            l.addWidget(QLabel(f"<span style='font-size:14px; font-weight:bold;'>{title}</span>"))
-            l.addWidget(QLabel(f"<span style='color:#777;'>{desc}</span>"))
-            l.addSpacing(15)
-            return w, l
-
-        # TAB 1: PSD
-        t1, l1 = create_tab("PSD Converter", "Convert Photoshop files to JPG.")
-        l1.addStretch()
-        btn1 = QPushButton("Convert All PSDs")
-        btn1.setObjectName("ActionBtn"); btn1.setFixedHeight(40)
+        # PSD
+        t1 = QWidget(); l1 = QVBoxLayout(t1)
+        btn1 = QPushButton("Convert All PSDs"); btn1.setObjectName("ActionBtn"); btn1.setFixedHeight(40)
         btn1.clicked.connect(lambda: self.start_batch("psd"))
-        l1.addWidget(btn1)
-        self.tabs.addTab(t1, "PSD")
+        l1.addStretch(); l1.addWidget(btn1); self.tabs.addTab(t1, "PSD")
 
-        # TAB 2: RESIZE
-        t2, l2 = create_tab("Smart Resizer", "Resize images to standard dimensions.")
+        # RESIZE
+        t2 = QWidget(); l2 = QVBoxLayout(t2)
         l2.addWidget(QLabel("Select Output Size:"))
-        
-        self.combo_res = QComboBox()
-        self.combo_res.addItems(["286x410", "380x560", "800x1200", "960x1440", "1920x1080", "Custom"])
-        self.combo_res.currentTextChanged.connect(self.toggle_custom)
+        self.combo_res = QComboBox(); self.combo_res.addItems(["286x410", "380x560", "800x1200", "960x1440", "1920x1080", "Custom"])
+        self.combo_res.currentTextChanged.connect(lambda t: self.custom_box.setVisible(t=="Custom"))
         l2.addWidget(self.combo_res)
-        
         self.custom_box = QWidget(); hla = QHBoxLayout(self.custom_box); hla.setContentsMargins(0,0,0,0)
-        self.ecw = QLineEdit(); self.ecw.setPlaceholderText("W")
-        self.ech = QLineEdit(); self.ech.setPlaceholderText("H")
+        self.ecw = QLineEdit(); self.ech = QLineEdit()
         hla.addWidget(QLabel("W:")); hla.addWidget(self.ecw); hla.addWidget(QLabel("H:")); hla.addWidget(self.ech)
         l2.addWidget(self.custom_box); self.custom_box.hide()
-        
-        l2.addStretch()
-        btn2 = QPushButton("Process Resizing")
-        btn2.setObjectName("ActionBtn"); btn2.setFixedHeight(40)
-        btn2.clicked.connect(lambda: self.start_batch("resize"))
-        l2.addWidget(btn2)
-        self.tabs.addTab(t2, "Resize")
+        l2.addStretch(); btn2 = QPushButton("Process Resizing"); btn2.setObjectName("ActionBtn"); btn2.setFixedHeight(40)
+        btn2.clicked.connect(lambda: self.start_batch("resize")); l2.addWidget(btn2); self.tabs.addTab(t2, "Resize")
 
-        # TAB 3: BANNER
-        t3, l3 = create_tab("HD Banner Generator", "Add overlays and rename.")
-        self.rad_2day = QRadioButton("2-Day Banner")
-        self.rad_3day = QRadioButton("3-Day Banner")
-        self.rad_2day.setChecked(True)
+        # BANNER (RENAMING UI)
+        t3 = QWidget(); l3 = QVBoxLayout(t3)
+        self.rad_2day = QRadioButton("2-Day Banner"); self.rad_3day = QRadioButton("3-Day Banner"); self.rad_2day.setChecked(True)
         self.rad_2day.toggled.connect(self.refresh_preview)
-        l3.addWidget(self.rad_2day)
-        l3.addWidget(self.rad_3day)
+        l3.addWidget(self.rad_2day); l3.addWidget(self.rad_3day)
         
-        rn_grp = QGroupBox("Custom Rename")
+        rn_grp = QGroupBox("Rename Selected File")
         rn_grp.setStyleSheet("color:#888; font-weight:bold; padding-top:15px;")
         rnl = QVBoxLayout(rn_grp)
         self.entry_rename = QLineEdit()
-        self.entry_rename.setPlaceholderText("e.g., Summer_Sale")
-        self.entry_rename.textChanged.connect(self.refresh_preview)
+        self.entry_rename.setPlaceholderText("Enter custom name for THIS file...")
+        # v16.0 Connect to new Save Logic
+        self.entry_rename.textChanged.connect(self.save_current_rename)
         rnl.addWidget(self.entry_rename)
-        l3.addWidget(rn_grp)
+        l3.addWidget(rn_grp); l3.addStretch()
         
-        l3.addStretch()
-        btn3 = QPushButton("Generate Banners")
-        btn3.setObjectName("ActionBtn"); btn3.setFixedHeight(40)
-        btn3.clicked.connect(lambda: self.start_batch("banner"))
-        l3.addWidget(btn3)
-        self.tabs.addTab(t3, "Banner")
-
-    def toggle_custom(self, txt):
-        if txt == "Custom": self.custom_box.show()
-        else: self.custom_box.hide()
-
-    def on_tab_changed(self):
-        self.reset_workspace()
-
-    def open_file_dialog(self):
-        files, _ = QFileDialog.getOpenFileNames(self, "Select Images", "", "Images (*.jpg *.png *.psd)")
-        if files: self.load_files(files)
+        btn3 = QPushButton("Generate Banners"); btn3.setObjectName("ActionBtn"); btn3.setFixedHeight(40)
+        btn3.clicked.connect(lambda: self.start_batch("banner")); l3.addWidget(btn3); self.tabs.addTab(t3, "Banner")
 
     def load_files(self, paths):
         valid = [f for f in paths if os.path.isfile(f)]
         if not valid: return
         self.files = valid
+        self.file_renames = {} # Clear renames on new load
         self.combo_files.blockSignals(True)
         self.combo_files.clear()
         self.combo_files.addItems([os.path.basename(f) for f in valid])
@@ -371,8 +298,23 @@ class MediaStudioPro(QMainWindow):
     def on_file_select(self, index):
         if self.files and index >= 0:
             self.current_preview_path = self.files[index]
-            self.entry_rename.clear()
+            
+            # v16.0: Load the saved name for this file (if any)
+            # We block signals so loading the text doesn't trigger 'textChanged' event
+            self.entry_rename.blockSignals(True)
+            saved_name = self.file_renames.get(self.current_preview_path, "")
+            self.entry_rename.setText(saved_name)
+            self.entry_rename.blockSignals(False)
+            
             self.refresh_preview()
+
+    def save_current_rename(self, text):
+        """ v16.0: Saves what user types into dictionary against current file path """
+        if self.current_preview_path:
+            self.file_renames[self.current_preview_path] = text
+            # We DON'T refresh preview here to avoid lag while typing, 
+            # unless you want to see the name update on a mock banner instantly.
+            # For now, we only update data.
 
     def refresh_preview(self):
         if not self.current_preview_path: return
@@ -387,7 +329,6 @@ class MediaStudioPro(QMainWindow):
             if path.lower().endswith(".psd"): img = PSDImage.open(path).composite()
             else: img = Image.open(path)
             
-            # Apply Banner Overlay for Preview if tab is active
             if self.tabs.currentIndex() == 2:
                 img = img.resize((286, 371), Image.Resampling.LANCZOS)
                 canvas = Image.new("RGB", (286, 410), (255, 255, 255))
@@ -399,36 +340,32 @@ class MediaStudioPro(QMainWindow):
                     canvas.paste(ovl, (0,0), mask=ovl)
                     img = canvas
             
-            # Convert to QImage and Send to SmartDropZone
             if img.mode == "RGB": img = img.convert("RGBA")
             qim = QImage(img.tobytes("raw", "RGBA"), img.size[0], img.size[1], QImage.Format.Format_RGBA8888)
-            
-            # UPDATED: Use the new method
             self.drop_zone.set_image(qim)
-
         except Exception as e:
             self.drop_zone.setText("Preview unavailable.")
-            print(e)
 
     def start_batch(self, mode):
         if not self.files: return QMessageBox.warning(self, "No Files", "Select files first.")
         settings = {"res": self.combo_res.currentText(), "ban_type": "2day" if self.rad_2day.isChecked() else "3day", 
-                    "custom_name": self.entry_rename.text(), "custom_w": self.ecw.text(), "custom_h": self.ech.text()}
-        self.worker = BatchProcessor(mode, self.files, settings)
+                    "custom_w": self.ecw.text(), "custom_h": self.ech.text()}
+        
+        # v16.0 Pass the rename map to the worker
+        self.worker = BatchProcessor(mode, self.files, settings, self.file_renames)
+        
         self.worker.progress_signal.connect(self.progress.setValue)
         self.worker.status_signal.connect(self.lbl_status.setText)
         self.worker.finished_signal.connect(lambda m: QMessageBox.information(self, "Success", m))
         self.worker.start()
 
     def reset_workspace(self):
-        self.files = []; self.combo_files.clear(); self.entry_rename.clear()
-        self.drop_zone.setText("\n\nDROP IMAGES HERE\n\n")
-        self.drop_zone._original_pixmap = None # Clear cached image
+        self.files = []; self.file_renames = {}; self.combo_files.clear(); self.entry_rename.clear()
+        self.drop_zone.setText("\n\nDROP IMAGES HERE\n\n"); self.drop_zone._original_pixmap = None
         self.lbl_info.setText("No file selected."); self.progress.setValue(0); self.lbl_status.setText("Cleared")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    
     splash_pix = QPixmap(os.path.join(ASSET_DIR, "splash_logo.png"))
     if splash_pix.isNull():
         splash_pix = QPixmap(600, 350); splash_pix.fill(QColor("#0f0f0f"))
@@ -437,13 +374,8 @@ if __name__ == "__main__":
         p.setPen(QColor("#0078d7")); p.setFont(QFont("Segoe UI", 36, QFont.Weight.Bold)); p.drawText(splash_pix.rect(), Qt.AlignmentFlag.AlignCenter, "MEDIA STUDIO")
         p.setPen(QColor("#666")); p.setFont(QFont("Consolas", 10)); p.drawText(0, 200, 600, 50, Qt.AlignmentFlag.AlignCenter, f"{VERSION} | Industry Edition")
         p.end()
-
     splash = QSplashScreen(splash_pix, Qt.WindowType.WindowStaysOnTopHint); splash.show()
     for msg in ["Loading Core...", "Initializing...", "Starting..."]:
         splash.showMessage(f"\n\n\n{msg}", Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignCenter, Qt.GlobalColor.white)
         time.sleep(0.5); app.processEvents()
-
-    window = MediaStudioPro()
-    window.showMaximized() 
-    splash.finish(window)
-    sys.exit(app.exec())
+    window = MediaStudioPro(); window.showMaximized(); splash.finish(window); sys.exit(app.exec())
