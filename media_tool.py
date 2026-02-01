@@ -2,7 +2,7 @@
 APPLICATION SECURITY MANIFEST & AUDIT LOG
 -----------------------------------------
 App Name:       Media Workflow Studio Pro
-Version:        5.6 (Zombie State Fix)
+Version:        5.7 (State Lock Fix & Direct Trigger)
 Author:         Ayush Singhal
 Company:        Deluxe Media
 Purpose:        Local image manipulation.
@@ -40,7 +40,7 @@ class ProMediaTool(ctk.CTk, BaseClass):
     def __init__(self):
         super().__init__()
 
-        self.title("Media Workflow Studio Pro v5.6")
+        self.title("Media Workflow Studio Pro v5.7")
         self.geometry("1100x750")
         self.minsize(1100, 750)
         
@@ -91,9 +91,14 @@ class ProMediaTool(ctk.CTk, BaseClass):
         self.lbl_preview_title = ctk.CTkLabel(self.right_frame, text="Live Preview", font=("Roboto", 18, "bold"))
         self.lbl_preview_title.pack(pady=(15, 5))
 
-        self.preview_selector = ctk.CTkOptionMenu(self.right_frame, dynamic_resizing=False, width=300, command=self.on_selector_change)
-        self.preview_selector.set("No Files Selected")
-        self.preview_selector.configure(state="disabled")
+        self.selector_var = ctk.StringVar(value="No Files Selected")
+        self.preview_selector = ctk.CTkOptionMenu(
+            self.right_frame, 
+            dynamic_resizing=False, 
+            width=300, 
+            variable=self.selector_var,
+            command=self.on_selector_change
+        )
         self.preview_selector.pack(pady=5)
         
         # 2. The Image
@@ -138,10 +143,9 @@ class ProMediaTool(ctk.CTk, BaseClass):
     # ============================================================
     def reset_ui(self):
         """
-        Deep Reset:
-        1. Unlock everything first (prevents zombie state).
-        2. Clear data.
-        3. Re-lock what needs to be locked.
+        FIXED RESET:
+        We do NOT disable the selector anymore. We just clear the list.
+        Disabling it caused the 'zombie' state when trying to reload.
         """
         try:
             # 1. Reset Internal State
@@ -151,51 +155,49 @@ class ProMediaTool(ctk.CTk, BaseClass):
             self.current_preview_path = None
             self.current_ctk_image = None
             
-            # 2. UNLOCK ALL WIDGETS FIRST
-            self.preview_selector.configure(state="normal")
-            self.info_box.configure(state="normal")
-            self.txt_psd.configure(state="normal")
-            self.txt_res.configure(state="normal")
-            self.txt_ban.configure(state="normal")
-
-            # 3. Clear Visuals
-            self.preview_selector.set("No Files Selected")
+            # 2. Reset Selector (KEEP ACTIVE)
+            self.selector_var.set("No Files Selected")
             self.preview_selector.configure(values=["No Files Selected"])
-            self.preview_selector.configure(state="disabled")
+            # DO NOT DISABLE HERE - This was the bug source
 
+            # 3. Reset Visuals
             self.lbl_preview_img.configure(image=None, text="[Drag Files Here]")
             self.lbl_rename_target.configure(text="No file selected")
             
             self.entry_manual_name.delete(0, "end")
             self.lbl_final_name.configure(text="Output: ...")
             
-            # 4. Clear Text Boxes
+            # 4. Clear Text Boxes (Unlock -> Clear -> Lock)
+            self.info_box.configure(state="normal")
             self.info_box.delete("0.0", "end")
             self.info_box.insert("0.0", "Waiting for input...")
             self.info_box.configure(state="disabled")
             
             for txt in [self.txt_psd, self.txt_res, self.txt_ban]:
+                txt.configure(state="normal")
                 txt.delete("0.0", "end")
                 txt.configure(state="disabled")
                 
-            self.update_idletasks() # Force UI refresh
+            self.update_idletasks()
             
         except Exception as e:
             print(f"Reset Exception: {e}")
 
     def on_tab_switch(self):
+        # Optional: auto-reset on tab switch. 
+        # Comment this line out if you want to keep files when switching tabs.
         self.reset_ui()
 
     # ============================================================
-    # === CRITICAL FIX: NEW BATCH LOADER =========================
+    # === LOADING NEW FILES ======================================
     # ============================================================
     def handle_files_input(self, files):
         if not files: return
         
-        # 1. Force Full Reset First
+        # 1. Clean old data first
         self.reset_ui()
         
-        # 2. Parse New Files
+        # 2. Load New Data
         self.file_list = list(files)
         self.file_names = [os.path.basename(f) for f in files]
         
@@ -204,12 +206,12 @@ class ProMediaTool(ctk.CTk, BaseClass):
             base = os.path.splitext(os.path.basename(f))[0]
             self.custom_names_map[f] = base
 
-        # 3. UNLOCK and Populate Selector
-        self.preview_selector.configure(state="normal")
+        # 3. Update Selector (Safe Mode)
+        # We update the values list and set the variable explicitly
         self.preview_selector.configure(values=self.file_names)
-        self.preview_selector.set(self.file_names[0])
+        self.selector_var.set(self.file_names[0])
         
-        # 4. UNLOCK and Populate Active Text Box
+        # 4. Update Text Box List
         active = self.tab_view.get()
         target_box = self.txt_psd if active == "PSD Bulk Converter" else (self.txt_res if active == "Smart Resizer" else self.txt_ban)
         
@@ -218,9 +220,13 @@ class ProMediaTool(ctk.CTk, BaseClass):
         for f in self.file_names: target_box.insert("end", f"{f}\n")
         target_box.configure(state="disabled")
 
-        # 5. FORCE WAKE UP: Manually trigger preview for first file
+        # 5. DIRECT PREVIEW TRIGGER (Bypassing dropdown callback for reliability)
         self.current_preview_path = self.file_list[0]
-        self.on_selector_change(self.file_names[0])
+        
+        # Call update functions directly
+        self.update_rename_fields() 
+        self.update_preview_logic()
+        self.update_file_info(self.current_preview_path)
 
     def on_selector_change(self, selected_filename):
         if selected_filename == "No Files Selected" or not self.file_list: return
@@ -228,7 +234,6 @@ class ProMediaTool(ctk.CTk, BaseClass):
             index = self.file_names.index(selected_filename)
             self.current_preview_path = self.file_list[index]
             
-            # Trigger all updates
             self.update_rename_fields() 
             self.update_preview_logic()
             self.update_file_info(self.current_preview_path)
@@ -264,7 +269,6 @@ class ProMediaTool(ctk.CTk, BaseClass):
         except Exception as e:
             txt = f"Could not read file info.\n{e}"
 
-        # Unlock -> Update -> Lock
         self.info_box.configure(state="normal")
         self.info_box.delete("0.0", "end")
         self.info_box.insert("0.0", txt)
@@ -354,7 +358,7 @@ class ProMediaTool(ctk.CTk, BaseClass):
         btn_frame.pack(pady=5)
         ctk.CTkButton(btn_frame, text="Select Files", command=lambda: self.select_files("psd")).pack(side="left", padx=5)
         
-        # RESET BUTTON FIX
+        # RESET
         ctk.CTkButton(btn_frame, text="Reset", fg_color="#C62828", hover_color="#B71C1C", width=80, command=self.reset_ui).pack(side="left", padx=5)
         
         self.txt_psd = ctk.CTkTextbox(self.tab_psd, height=150, state="disabled")
@@ -381,7 +385,7 @@ class ProMediaTool(ctk.CTk, BaseClass):
         btn_frame.pack(pady=5)
         ctk.CTkButton(btn_frame, text="Select Files", command=lambda: self.select_files("img")).pack(side="left", padx=5)
         
-        # RESET BUTTON FIX
+        # RESET
         ctk.CTkButton(btn_frame, text="Reset", fg_color="#C62828", hover_color="#B71C1C", width=80, command=self.reset_ui).pack(side="left", padx=5)
         
         self.txt_res = ctk.CTkTextbox(self.tab_resize, height=100, state="disabled")
@@ -413,7 +417,7 @@ class ProMediaTool(ctk.CTk, BaseClass):
         btn_frame.pack(pady=5)
         ctk.CTkButton(btn_frame, text="Select Files", command=lambda: self.select_files("img")).pack(side="left", padx=5)
         
-        # RESET BUTTON FIX
+        # RESET
         ctk.CTkButton(btn_frame, text="Reset", fg_color="#C62828", hover_color="#B71C1C", width=80, command=self.reset_ui).pack(side="left", padx=5)
         
         self.txt_ban = ctk.CTkTextbox(self.tab_banner, height=60, state="disabled")
