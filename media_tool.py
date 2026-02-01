@@ -2,7 +2,7 @@
 APPLICATION SECURITY MANIFEST & AUDIT LOG
 -----------------------------------------
 App Name:       Media Workflow Studio Pro
-Version:        8.0 (Bulletproof Logic)
+Version:        8.5 (Anti-Ghosting Image Patch)
 Author:         Ayush Singhal
 Company:        Deluxe Media
 Purpose:        Local image manipulation.
@@ -40,7 +40,7 @@ class ProMediaTool(ctk.CTk, BaseClass):
     def __init__(self):
         super().__init__()
 
-        self.title("Media Workflow Studio Pro v8.0")
+        self.title("Media Workflow Studio Pro v8.5")
         self.geometry("1100x750")
         self.minsize(1100, 750)
         
@@ -154,17 +154,22 @@ class ProMediaTool(ctk.CTk, BaseClass):
         finally: self.context_menu.grab_release()
 
     def reset_workspace(self):
-        """Clears memory and UI without freezing."""
+        """Clears memory with safety flush."""
+        # 1. Unbind Image from UI first
+        self.lbl_preview_img.configure(image=None)
+        self.update_idletasks() # Force UI update to release reference
+        
+        # 2. Clear Internal Data
         self.file_list = []
         self.file_names = []
         self.custom_names_map = {}
         self.current_preview_path = None
         self.persistent_image_ref = None
 
+        # 3. Reset UI Elements
         self.selector_var.set("No Files Selected")
         self.preview_selector.configure(values=["No Files Selected"])
-
-        self.lbl_preview_img.configure(image=None, text="[Drag Files Here]\n\n(Right-Click to Clear)")
+        self.lbl_preview_img.configure(text="[Drag Files Here]\n\n(Right-Click to Clear)")
         self.lbl_rename_target.configure(text="No file selected")
         self.entry_manual_name.delete(0, "end")
         self.lbl_final_name.configure(text="Output: ...")
@@ -180,29 +185,35 @@ class ProMediaTool(ctk.CTk, BaseClass):
             txt.configure(state="disabled")
 
     # ============================================================
-    # === 2. FILE LOADING (FIXED) ================================
+    # === 2. FILE LOADING (PATCHED) ==============================
     # ============================================================
     def handle_files_input(self, files):
         if not files: return
         
         try:
-            # 1. FILTER: Only allow valid files (No folders, no bad paths)
+            # 1. FILTER
             valid_files = [f for f in files if os.path.isfile(f)]
-            
             if not valid_files:
-                messagebox.showerror("Error", "No valid files detected.\n(Did you drop a folder?)")
+                messagebox.showerror("Error", "No valid files detected.")
                 return
 
-            # 2. CLEAR INTERNAL STATE (Safe Reset)
+            # --- CRITICAL FIX: SAFETY FLUSH ---
+            # Remove the old image from the label BEFORE loading the new one.
+            # This prevents "pyimageX doesn't exist" errors.
+            self.lbl_preview_img.configure(image=None) 
+            self.persistent_image_ref = None
+            self.update_idletasks() 
+            # ----------------------------------
+
+            # 2. LOAD DATA
             self.file_list = list(valid_files)
             self.file_names = [os.path.basename(f) for f in valid_files]
             self.custom_names_map = {f: os.path.splitext(os.path.basename(f))[0] for f in valid_files}
 
-            # 3. UPDATE SELECTOR
+            # 3. UPDATE UI
             self.preview_selector.configure(values=self.file_names)
             self.selector_var.set(self.file_names[0])
             
-            # 4. UPDATE LIST BOX
             active_box = self.txt_psd
             if self.tab_view.get() == "Smart Resizer": active_box = self.txt_res
             elif self.tab_view.get() == "HD Banner & Rename": active_box = self.txt_ban
@@ -212,19 +223,22 @@ class ProMediaTool(ctk.CTk, BaseClass):
             for f in self.file_names: active_box.insert("end", f"{f}\n")
             active_box.configure(state="disabled")
 
-            # 5. KICKSTART PREVIEW (Protected)
+            # 4. START PREVIEW
             if self.file_list:
                 self.current_preview_path = self.file_list[0]
                 self.refresh_engine()
             
         except Exception as e:
-            # Show exact error to help debugging
             print(f"Error details: {e}")
             messagebox.showerror("Load Error", f"An error occurred while loading files:\n\n{str(e)}")
 
     def on_selector_click(self, selected_filename):
         if selected_filename == "No Files Selected" or not self.file_list: return
         try:
+            # SAFETY FLUSH for Selector Click too
+            self.lbl_preview_img.configure(image=None)
+            self.update_idletasks()
+            
             index = self.file_names.index(selected_filename)
             self.current_preview_path = self.file_list[index]
             self.refresh_engine()
@@ -236,20 +250,21 @@ class ProMediaTool(ctk.CTk, BaseClass):
     def refresh_engine(self):
         if not self.current_preview_path: return
         
-        # Rename Logic
         try:
+            # Rename Logic
             self.lbl_rename_target.configure(text=f"Editing: {os.path.basename(self.current_preview_path)}")
             stored_name = self.custom_names_map.get(self.current_preview_path, "")
             self.entry_manual_name.delete(0, "end")
             self.entry_manual_name.insert(0, stored_name)
             self._update_suffix_label(stored_name)
-        except: pass
 
-        # Info Logic
-        self.update_file_info(self.current_preview_path)
+            # Info Logic
+            self.update_file_info(self.current_preview_path)
 
-        # Image Logic
-        self.generate_preview_image(self.current_preview_path)
+            # Image Logic
+            self.generate_preview_image(self.current_preview_path)
+        except Exception as e:
+            print(f"Engine Error: {e}")
 
     def update_file_info(self, filepath):
         txt = "Reading..."
@@ -277,6 +292,7 @@ class ProMediaTool(ctk.CTk, BaseClass):
 
     def generate_preview_image(self, filepath):
         try:
+            # Generate Image Object
             if filepath.lower().endswith(".psd"):
                 img = PSDImage.open(filepath).composite()
             else:
@@ -295,10 +311,18 @@ class ProMediaTool(ctk.CTk, BaseClass):
                     img = canvas
 
             img.thumbnail((286, 410), Image.Resampling.LANCZOS)
-            self.persistent_image_ref = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
+            
+            # Create CTkImage
+            new_image = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
+            
+            # ASSIGN TO SELF BEFORE CONFIGURING UI
+            self.persistent_image_ref = new_image
+            
+            # Configure UI
             self.lbl_preview_img.configure(image=self.persistent_image_ref, text="")
             
         except Exception as e:
+            print(f"Preview Gen Error: {e}")
             self.lbl_preview_img.configure(image=None, text="Preview Error")
 
     def on_manual_rename_type(self, event):
