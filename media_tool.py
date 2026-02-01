@@ -2,7 +2,7 @@
 APPLICATION SECURITY MANIFEST & AUDIT LOG
 -----------------------------------------
 App Name:       Media Workflow Studio Pro
-Version:        7.5 (Non-Blocking State Engine)
+Version:        8.0 (Bulletproof Logic)
 Author:         Ayush Singhal
 Company:        Deluxe Media
 Purpose:        Local image manipulation.
@@ -26,7 +26,6 @@ try:
     DRAG_DROP_AVAILABLE = True
 except ImportError:
     DRAG_DROP_AVAILABLE = False
-    # Fallback class if library is missing
     class TkinterDnD:
         class DnDWrapper:
             pass
@@ -41,7 +40,7 @@ class ProMediaTool(ctk.CTk, BaseClass):
     def __init__(self):
         super().__init__()
 
-        self.title("Media Workflow Studio Pro v7.5")
+        self.title("Media Workflow Studio Pro v8.0")
         self.geometry("1100x750")
         self.minsize(1100, 750)
         
@@ -148,84 +147,80 @@ class ProMediaTool(ctk.CTk, BaseClass):
         return os.path.join(base_path, relative_path)
 
     # ============================================================
-    # === 1. STATE MANAGEMENT (FIXED) ============================
+    # === 1. STATE MANAGEMENT ====================================
     # ============================================================
     def show_context_menu(self, event):
         try: self.context_menu.tk_popup(event.x_root, event.y_root)
         finally: self.context_menu.grab_release()
 
     def reset_workspace(self):
-        """
-        Manually clears the workspace. 
-        CRITICAL FIX: Does NOT use self.update(). 
-        This prevents the 'frozen' state.
-        """
-        # A. Clear Data
+        """Clears memory and UI without freezing."""
         self.file_list = []
         self.file_names = []
         self.custom_names_map = {}
         self.current_preview_path = None
         self.persistent_image_ref = None
 
-        # B. Reset Selector
         self.selector_var.set("No Files Selected")
         self.preview_selector.configure(values=["No Files Selected"])
 
-        # C. Reset Visuals
         self.lbl_preview_img.configure(image=None, text="[Drag Files Here]\n\n(Right-Click to Clear)")
         self.lbl_rename_target.configure(text="No file selected")
         self.entry_manual_name.delete(0, "end")
         self.lbl_final_name.configure(text="Output: ...")
         
-        # D. Reset Info Box
         self.info_box.configure(state="normal")
         self.info_box.delete("0.0", "end")
         self.info_box.insert("0.0", "Waiting for input...")
         self.info_box.configure(state="disabled")
 
-        # E. Reset Text Lists
         for txt in [self.txt_psd, self.txt_res, self.txt_ban]:
             txt.configure(state="normal")
             txt.delete("0.0", "end")
             txt.configure(state="disabled")
 
     # ============================================================
-    # === 2. FILE LOADING (DECOUPLED) ============================
+    # === 2. FILE LOADING (FIXED) ================================
     # ============================================================
     def handle_files_input(self, files):
         if not files: return
         
         try:
-            # FIX: We do NOT call self.reset_workspace() here.
-            # We overwrite the data directly. This prevents the "reset flash" conflict.
+            # 1. FILTER: Only allow valid files (No folders, no bad paths)
+            valid_files = [f for f in files if os.path.isfile(f)]
             
-            # 1. Ingest Data
-            self.file_list = list(files)
-            self.file_names = [os.path.basename(f) for f in files]
-            self.custom_names_map = {}
-            for f in files:
-                self.custom_names_map[f] = os.path.splitext(os.path.basename(f))[0]
+            if not valid_files:
+                messagebox.showerror("Error", "No valid files detected.\n(Did you drop a folder?)")
+                return
 
-            # 2. Update UI Components
+            # 2. CLEAR INTERNAL STATE (Safe Reset)
+            self.file_list = list(valid_files)
+            self.file_names = [os.path.basename(f) for f in valid_files]
+            self.custom_names_map = {f: os.path.splitext(os.path.basename(f))[0] for f in valid_files}
+
+            # 3. UPDATE SELECTOR
             self.preview_selector.configure(values=self.file_names)
             self.selector_var.set(self.file_names[0])
             
+            # 4. UPDATE LIST BOX
             active_box = self.txt_psd
             if self.tab_view.get() == "Smart Resizer": active_box = self.txt_res
             elif self.tab_view.get() == "HD Banner & Rename": active_box = self.txt_ban
             
             active_box.configure(state="normal")
-            active_box.delete("0.0", "end") # Clear just the text box
+            active_box.delete("0.0", "end")
             for f in self.file_names: active_box.insert("end", f"{f}\n")
             active_box.configure(state="disabled")
 
-            # 3. Kickstart Preview
-            self.current_preview_path = self.file_list[0]
-            self.refresh_engine()
+            # 5. KICKSTART PREVIEW (Protected)
+            if self.file_list:
+                self.current_preview_path = self.file_list[0]
+                self.refresh_engine()
             
         except Exception as e:
-            print(f"Error loading files: {e}")
-            messagebox.showerror("Load Error", "Failed to load files. Please try again.")
+            # Show exact error to help debugging
+            print(f"Error details: {e}")
+            messagebox.showerror("Load Error", f"An error occurred while loading files:\n\n{str(e)}")
 
     def on_selector_click(self, selected_filename):
         if selected_filename == "No Files Selected" or not self.file_list: return
