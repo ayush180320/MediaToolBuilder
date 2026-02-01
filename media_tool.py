@@ -6,16 +6,17 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QLabel, QPushButton, QTabWidget, QLineEdit, QComboBox, 
                              QMessageBox, QFileDialog, QRadioButton, QProgressBar, 
                              QFrame, QGroupBox, QStatusBar, QSplashScreen)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize
-from PyQt6.QtGui import (QPixmap, QImage, QDragEnterEvent, QDropEvent, QFont, QIcon, 
-                         QAction, QPainter, QPen, QColor, QKeySequence, QShortcut)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtGui import (QPixmap, QImage, QDragEnterEvent, QDropEvent, QFont, 
+                         QPainter, QPen, QColor, QKeySequence, QShortcut)
 from PIL import Image, ImageFilter
 from psd_tools import PSDImage
 
 # --- CONFIGURATION ---
 ASSET_DIR = os.path.dirname(os.path.abspath(__file__))
-VERSION = "v13.0 Master"
-COPYRIGHT_OWNER = "Ayush Singhal"
+VERSION = "v14.0 Custom"
+COPYRIGHT_OWNER = "Media Studio Pro Inc." 
+YEAR = "2026"
 
 # --- WORKER THREAD ---
 class BatchProcessor(QThread):
@@ -49,6 +50,7 @@ class BatchProcessor(QThread):
                 name_only = os.path.splitext(base_name)[0]
                 self.status_signal.emit(f"Processing ({index+1}/{total}): {base_name}...")
                 
+                # Load Image
                 if f_path.lower().endswith(".psd"):
                     psd = PSDImage.open(f_path)
                     img = psd.composite()
@@ -62,11 +64,23 @@ class BatchProcessor(QThread):
                 
                 final_name = name_only 
 
+                # --- RESIZE LOGIC ---
                 if self.mode == "resize":
-                    w, h = map(int, self.settings['res'].split('x'))
+                    # Check if Custom or Preset
+                    if self.settings['res'] == "Custom":
+                        try:
+                            w = int(self.settings['custom_w'])
+                            h = int(self.settings['custom_h'])
+                        except ValueError:
+                            # Fallback if inputs are bad, though UI checks this
+                            w, h = 1000, 1000 
+                    else:
+                        w, h = map(int, self.settings['res'].split('x'))
+                        
                     img = img.resize((w, h), Image.Resampling.LANCZOS)
                     final_name = f"{name_only}_{w}x{h}"
 
+                # --- BANNER LOGIC ---
                 elif self.mode == "banner":
                     custom_name = self.settings.get('custom_name', '').strip()
                     base_for_banner = custom_name if custom_name else name_only
@@ -88,6 +102,7 @@ class BatchProcessor(QThread):
                     suf = "_2Day" if self.settings['ban_type'] == "2day" else "_3Day"
                     final_name = f"{base_for_banner}{suf}"
 
+                # Save
                 save_path = os.path.join(out_dir, final_name + ".jpg")
                 if img.mode in ("RGBA", "P"): img = img.convert("RGB")
                 img.save(save_path, "JPEG", quality=100, subsampling=0, dpi=original_dpi)
@@ -96,7 +111,7 @@ class BatchProcessor(QThread):
                 self.progress_signal.emit(int((index + 1) / total * 100))
 
             except Exception as e:
-                print(f"Error: {e}")
+                print(f"Error processing {f_path}: {e}")
 
         self.status_signal.emit("Ready")
         self.finished_signal.emit(f"Batch Complete. {count} files saved to '{folder_name}'.")
@@ -141,7 +156,7 @@ class MediaStudioPro(QMainWindow):
         self.resize(1200, 700)
         self.setup_styles()
 
-        # --- GHOST SHORTCUT (Ctrl + Alt + A) ---
+        # Ghost Shortcut
         self.ghost_copy = QShortcut(QKeySequence("Ctrl+Alt+A"), self)
         self.ghost_copy.activated.connect(self.show_ghost_copyright)
 
@@ -175,6 +190,8 @@ class MediaStudioPro(QMainWindow):
 
         self.tabs = QTabWidget()
         self.setup_tabs()
+        # FEATURE 2: Reset workspace when tab changes
+        self.tabs.currentChanged.connect(self.on_tab_changed)
         left_layout.addWidget(self.tabs)
         
         left_layout.addStretch()
@@ -188,7 +205,6 @@ class MediaStudioPro(QMainWindow):
         left_layout.addWidget(self.progress)
         
         btn_reset = QPushButton("Clear Workspace")
-        btn_reset.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_reset.setObjectName("GhostBtn")
         btn_reset.clicked.connect(self.reset_workspace)
         left_layout.addWidget(btn_reset)
@@ -220,11 +236,11 @@ class MediaStudioPro(QMainWindow):
         self.statusBar().showMessage("System Ready")
 
     def show_ghost_copyright(self):
-        """Hidden method triggered by Ctrl+Alt+A"""
+        # FEATURE 3: Updated Year to 2026
         msg = QMessageBox(self)
         msg.setWindowTitle("About")
         msg.setText(f"<h3>Media Studio Pro {VERSION}</h3>"
-                    f"<p>Copyright &copy; 2024 <b>{COPYRIGHT_OWNER}</b></p>"
+                    f"<p>Copyright &copy; {YEAR} <b>{COPYRIGHT_OWNER}</b></p>"
                     "<p>All rights reserved.<br>Authorized for internal industrial use only.</p>")
         msg.setStyleSheet("""
             QMessageBox { background-color: #1a1a1a; }
@@ -262,6 +278,7 @@ class MediaStudioPro(QMainWindow):
             l.addSpacing(15)
             return w, l
 
+        # TAB 1: PSD
         t1, l1 = create_tab_layout("PSD Converter", "Convert Photoshop files to JPG.\nFolder: /_Output_Converted")
         l1.addStretch()
         btn1 = QPushButton("Convert All PSDs")
@@ -270,11 +287,32 @@ class MediaStudioPro(QMainWindow):
         l1.addWidget(btn1)
         self.tabs.addTab(t1, "PSD")
 
+        # TAB 2: RESIZE
         t2, l2 = create_tab_layout("Smart Resizer", "Resize images to standard dimensions.\nFolder: /_Output_Resized")
         l2.addWidget(QLabel("Select Output Size:"))
+        
+        # Resize Combobox
         self.combo_res = QComboBox()
-        self.combo_res.addItems(["286x410", "960x1440", "1920x1080", "380x560"])
+        self.combo_res.addItems(["286x410", "960x1440", "1920x1080", "380x560", "Custom"]) # Added Custom
+        self.combo_res.currentTextChanged.connect(self.toggle_custom_resize)
         l2.addWidget(self.combo_res)
+
+        # FEATURE 1: Custom Resize Inputs (Hidden by default)
+        self.custom_res_container = QWidget()
+        custom_layout = QHBoxLayout(self.custom_res_container)
+        custom_layout.setContentsMargins(0, 5, 0, 5)
+        
+        self.entry_cw = QLineEdit(); self.entry_cw.setPlaceholderText("Width")
+        self.entry_ch = QLineEdit(); self.entry_ch.setPlaceholderText("Height")
+        
+        custom_layout.addWidget(QLabel("W:"))
+        custom_layout.addWidget(self.entry_cw)
+        custom_layout.addWidget(QLabel("H:"))
+        custom_layout.addWidget(self.entry_ch)
+        
+        l2.addWidget(self.custom_res_container)
+        self.custom_res_container.hide() # Initial state: Hidden
+
         l2.addStretch()
         btn2 = QPushButton("Process Resizing")
         btn2.setObjectName("ActionBtn"); btn2.setFixedHeight(40)
@@ -282,6 +320,7 @@ class MediaStudioPro(QMainWindow):
         l2.addWidget(btn2)
         self.tabs.addTab(t2, "Resize")
 
+        # TAB 3: BANNER
         t3, l3 = create_tab_layout("HD Banner Generator", "Add overlays and rename.\nFolder: /_Output_Banners")
         self.rad_2day = QRadioButton("2-Day Banner Overlay")
         self.rad_3day = QRadioButton("3-Day Banner Overlay")
@@ -306,6 +345,20 @@ class MediaStudioPro(QMainWindow):
         btn3.clicked.connect(lambda: self.start_batch("banner"))
         l3.addWidget(btn3)
         self.tabs.addTab(t3, "Banner")
+
+    # --- LOGIC ---
+
+    def toggle_custom_resize(self, text):
+        """Shows/Hides the custom width/height inputs"""
+        if text == "Custom":
+            self.custom_res_container.show()
+        else:
+            self.custom_res_container.hide()
+
+    def on_tab_changed(self):
+        """Automatically resets the workspace when tab is switched"""
+        self.reset_workspace()
+        self.lbl_status.setText("Workspace reset (Tab Switched)")
 
     def open_file_dialog(self):
         files, _ = QFileDialog.getOpenFileNames(self, "Select Images", "", "Images (*.jpg *.png *.jpeg *.psd)")
@@ -363,11 +416,25 @@ class MediaStudioPro(QMainWindow):
             self.drop_zone.setPixmap(QPixmap.fromImage(qim))
             self.drop_zone.setText("")
         except Exception as e:
-            self.drop_zone.setText("Preview unavailable for this file.")
+            self.drop_zone.setText("Preview unavailable.")
 
     def start_batch(self, mode):
         if not self.files: return QMessageBox.warning(self, "No Files", "Please select files first.")
-        settings = {"res": self.combo_res.currentText(), "ban_type": "2day" if self.rad_2day.isChecked() else "3day", "custom_name": self.entry_rename.text()}
+        
+        # Basic Settings
+        settings = {
+            "res": self.combo_res.currentText(),
+            "ban_type": "2day" if self.rad_2day.isChecked() else "3day",
+            "custom_name": self.entry_rename.text(),
+            "custom_w": self.entry_cw.text(),
+            "custom_h": self.entry_ch.text()
+        }
+
+        # Validation for Custom Resize
+        if mode == "resize" and settings['res'] == "Custom":
+            if not (settings['custom_w'].isdigit() and settings['custom_h'].isdigit()):
+                return QMessageBox.warning(self, "Invalid Input", "Please enter valid numeric numbers for Width and Height.")
+
         self.worker = BatchProcessor(mode, self.files, settings)
         self.worker.progress_signal.connect(self.progress.setValue)
         self.worker.status_signal.connect(self.lbl_status.setText)
@@ -384,6 +451,7 @@ class MediaStudioPro(QMainWindow):
         self.progress.setValue(0)
         self.lbl_status.setText("Workspace Cleared")
 
+# --- ENTRY POINT ---
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     
