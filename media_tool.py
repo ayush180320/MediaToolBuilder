@@ -13,7 +13,7 @@ from psd_tools import PSDImage
 
 # --- CONFIGURATION ---
 ASSET_DIR = os.path.dirname(os.path.abspath(__file__))
-VERSION = "v15.3 Final"
+VERSION = "v15"
 COPYRIGHT_OWNER = "Ayush Singhal" 
 YEAR = "2026"
 
