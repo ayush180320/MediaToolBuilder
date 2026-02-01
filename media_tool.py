@@ -2,14 +2,17 @@
 APPLICATION SECURITY MANIFEST & AUDIT LOG
 -----------------------------------------
 App Name:       Media Workflow Studio Pro
-Version:        6.0 (Nuclear Stability Fix)
+Version:        7.0 (Buttonless Auto-Flush)
 Author:         Ayush Singhal
 Company:        Deluxe Media
 Purpose:        Local image manipulation.
+
+COPYRIGHT NOTICE:
+The logic and architecture of this script were authored by Ayush Singhal.
 """
 
 import customtkinter as ctk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, Menu
 import os
 import threading
 import sys
@@ -37,11 +40,14 @@ class ProMediaTool(ctk.CTk, BaseClass):
     def __init__(self):
         super().__init__()
 
-        self.title("Media Workflow Studio Pro v6.0 (Final Stable)")
+        self.title("Media Workflow Studio Pro v7.0")
         self.geometry("1100x750")
         self.minsize(1100, 750)
         
+        # --- KEYBOARD & MOUSE BINDINGS ---
         self.bind("<Control-Alt-a>", self._reveal_author)
+        # BIND RIGHT-CLICK to the whole window
+        self.bind("<Button-3>", self.show_context_menu)
         
         # --- GRID LAYOUT ---
         self.grid_columnconfigure(0, weight=4) # Left Panel
@@ -98,7 +104,7 @@ class ProMediaTool(ctk.CTk, BaseClass):
         self.preview_selector.pack(pady=5)
         
         # Image Area
-        self.lbl_preview_img = ctk.CTkLabel(self.right_frame, text="[Drag Files Here]", width=286, height=410, fg_color="#222222", corner_radius=10)
+        self.lbl_preview_img = ctk.CTkLabel(self.right_frame, text="[Drag Files Here]\n\n(Right-Click to Clear)", width=286, height=410, fg_color="#222222", corner_radius=10)
         self.lbl_preview_img.pack(pady=10, padx=20)
 
         # File Info Area
@@ -113,14 +119,20 @@ class ProMediaTool(ctk.CTk, BaseClass):
         self.info_box.configure(state="disabled")
 
         # ============================================================
-        # === INTERNAL STATE (CRITICAL) ==============================
+        # === INTERNAL STATE =========================================
         # ============================================================
-        self.file_list = []      # Full paths
-        self.file_names = []     # Just filenames
+        self.file_list = []      
+        self.file_names = []     
         self.custom_names_map = {} 
         self.current_preview_path = None
-        self.persistent_image_ref = None # PREVENTS GARBAGE COLLECTION
+        self.persistent_image_ref = None 
         
+        # Context Menu Setup
+        self.context_menu = Menu(self, tearoff=0)
+        self.context_menu.add_command(label="Reset Workspace", command=self.reset_workspace)
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="About", command=self._reveal_author)
+
         self._setup_psd_tab()
         self._setup_resize_tab()
         self._setup_banner_tab()
@@ -136,12 +148,19 @@ class ProMediaTool(ctk.CTk, BaseClass):
         return os.path.join(base_path, relative_path)
 
     # ============================================================
-    # === 1. THE ROBUST RESET ====================================
+    # === 1. THE RESET LOGIC (Hidden, No Button) =================
     # ============================================================
-    def reset_ui(self):
+    def show_context_menu(self, event):
+        """Right Click Popup"""
+        try:
+            self.context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.context_menu.grab_release()
+
+    def reset_workspace(self):
         """
-        Completely wipes data but keeps widgets 'Alive'
-        so the Reset button never dies.
+        The Master Reset Function.
+        Called automatically on drag-and-drop, or manually via Right Click.
         """
         # A. Clear Data
         self.file_list = []
@@ -150,12 +169,12 @@ class ProMediaTool(ctk.CTk, BaseClass):
         self.current_preview_path = None
         self.persistent_image_ref = None
 
-        # B. Reset Selector (Do NOT disable it, just empty it)
+        # B. Reset Selector
         self.selector_var.set("No Files Selected")
         self.preview_selector.configure(values=["No Files Selected"])
 
         # C. Reset Visuals
-        self.lbl_preview_img.configure(image=None, text="[Drag Files Here]")
+        self.lbl_preview_img.configure(image=None, text="[Drag Files Here]\n\n(Right-Click to Clear)")
         self.lbl_rename_target.configure(text="No file selected")
         self.entry_manual_name.delete(0, "end")
         self.lbl_final_name.configure(text="Output: ...")
@@ -172,32 +191,32 @@ class ProMediaTool(ctk.CTk, BaseClass):
             txt.delete("0.0", "end")
             txt.configure(state="disabled")
             
-        # F. Force Update to ensure UI is ready
         self.update()
 
     def on_tab_switch(self):
-        self.reset_ui()
+        # Optional: Auto-reset on tab change to keep memory clean
+        self.reset_workspace()
 
     # ============================================================
-    # === 2. THE FILE LOADER =====================================
+    # === 2. THE AUTO-FLUSH LOADER ===============================
     # ============================================================
     def handle_files_input(self, files):
         if not files: return
         
-        # 1. Clean Slate
-        self.reset_ui()
+        # --- STEP 1: AUTO-RESET ---
+        # We wipe everything immediately. This guarantees a clean slate.
+        self.reset_workspace()
         
-        # 2. Ingest Data
+        # --- STEP 2: LOAD NEW DATA ---
         self.file_list = list(files)
         self.file_names = [os.path.basename(f) for f in files]
         for f in files:
             self.custom_names_map[f] = os.path.splitext(os.path.basename(f))[0]
 
-        # 3. Update Dropdown
+        # --- STEP 3: UPDATE UI ---
         self.preview_selector.configure(values=self.file_names)
         self.selector_var.set(self.file_names[0])
         
-        # 4. Update List Box
         active_box = self.txt_psd
         if self.tab_view.get() == "Smart Resizer": active_box = self.txt_res
         elif self.tab_view.get() == "HD Banner & Rename": active_box = self.txt_ban
@@ -206,12 +225,11 @@ class ProMediaTool(ctk.CTk, BaseClass):
         for f in self.file_names: active_box.insert("end", f"{f}\n")
         active_box.configure(state="disabled")
 
-        # 5. FORCE PREVIEW (The "Kickstart")
+        # --- STEP 4: KICKSTART PREVIEW ---
         self.current_preview_path = self.file_list[0]
         self.refresh_engine()
 
     def on_selector_click(self, selected_filename):
-        """User Triggered Selection"""
         if selected_filename == "No Files Selected" or not self.file_list: return
         try:
             index = self.file_names.index(selected_filename)
@@ -220,13 +238,12 @@ class ProMediaTool(ctk.CTk, BaseClass):
         except: pass
 
     # ============================================================
-    # === 3. THE ENGINE (Preview, Info, Rename) ==================
+    # === 3. THE ENGINE ==========================================
     # ============================================================
     def refresh_engine(self):
-        """Updates Info, Image, and Rename fields in one go."""
         if not self.current_preview_path: return
         
-        # --- PART A: RENAME FIELDS ---
+        # Rename
         try:
             self.lbl_rename_target.configure(text=f"Editing: {os.path.basename(self.current_preview_path)}")
             stored_name = self.custom_names_map.get(self.current_preview_path, "")
@@ -235,10 +252,10 @@ class ProMediaTool(ctk.CTk, BaseClass):
             self._update_suffix_label(stored_name)
         except: pass
 
-        # --- PART B: FILE INFO ---
+        # Info
         self.update_file_info(self.current_preview_path)
 
-        # --- PART C: IMAGE PREVIEW (Fixed) ---
+        # Image
         self.generate_preview_image(self.current_preview_path)
 
     def update_file_info(self, filepath):
@@ -266,18 +283,12 @@ class ProMediaTool(ctk.CTk, BaseClass):
         self.info_box.configure(state="disabled")
 
     def generate_preview_image(self, filepath):
-        """
-        Strictly handles image generation.
-        Saves result to self.persistent_image_ref to prevent garbage collection.
-        """
         try:
-            # 1. Load Raw Image
             if filepath.lower().endswith(".psd"):
                 img = PSDImage.open(filepath).composite()
             else:
                 img = Image.open(filepath)
 
-            # 2. Apply Banner Overlay (If needed)
             if self.tab_view.get() == "HD Banner & Rename":
                 img = img.resize((286, 371), Image.Resampling.LANCZOS)
                 canvas = Image.new("RGB", (286, 410), (255, 255, 255))
@@ -290,18 +301,12 @@ class ProMediaTool(ctk.CTk, BaseClass):
                     canvas.paste(ovl, (0,0), mask=ovl)
                     img = canvas
 
-            # 3. Create Thumbnail for UI
             img.thumbnail((286, 410), Image.Resampling.LANCZOS)
-            
-            # 4. CRITICAL: Save to self variable
             self.persistent_image_ref = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
-            
-            # 5. Set Label
             self.lbl_preview_img.configure(image=self.persistent_image_ref, text="")
             
         except Exception as e:
             self.lbl_preview_img.configure(image=None, text="Preview Error")
-            print(f"Preview Error: {e}")
 
     def on_manual_rename_type(self, event):
         if not self.current_preview_path: return
@@ -338,13 +343,12 @@ class ProMediaTool(ctk.CTk, BaseClass):
         files = filedialog.askopenfilenames(filetypes=ft)
         if files: self.handle_files_input(files)
 
-    # --- TABS ---
+    # --- TABS (CLEANED UP) ---
     def _setup_psd_tab(self):
         ctk.CTkLabel(self.tab_psd, text="PSD Bulk Converter", font=("Arial", 14, "bold")).pack(pady=5)
         f = ctk.CTkFrame(self.tab_psd, fg_color="transparent"); f.pack(pady=5)
         ctk.CTkButton(f, text="Select Files", command=lambda: self.select_files("psd")).pack(side="left", padx=5)
-        # RESET BUTTON: Note that I call reset_ui, I do not mess with button state
-        ctk.CTkButton(f, text="Reset", fg_color="#C62828", hover_color="#B71C1C", width=80, command=self.reset_ui).pack(side="left", padx=5)
+        # NO RESET BUTTON
         self.txt_psd = ctk.CTkTextbox(self.tab_psd, height=150, state="disabled")
         self.txt_psd.pack(pady=5, fill="x")
         ctk.CTkButton(self.tab_psd, text="Convert All", fg_color="green", command=lambda: threading.Thread(target=self._process_psd, daemon=True).start()).pack(pady=10)
@@ -367,7 +371,7 @@ class ProMediaTool(ctk.CTk, BaseClass):
         ctk.CTkLabel(self.tab_resize, text="Smart Resizer", font=("Arial", 14, "bold")).pack(pady=5)
         f = ctk.CTkFrame(self.tab_resize, fg_color="transparent"); f.pack(pady=5)
         ctk.CTkButton(f, text="Select Files", command=lambda: self.select_files("img")).pack(side="left", padx=5)
-        ctk.CTkButton(f, text="Reset", fg_color="#C62828", hover_color="#B71C1C", width=80, command=self.reset_ui).pack(side="left", padx=5)
+        # NO RESET BUTTON
         self.txt_res = ctk.CTkTextbox(self.tab_resize, height=100, state="disabled")
         self.txt_res.pack(pady=5, fill="x")
         self.res_var = ctk.StringVar(value="286x410")
@@ -394,7 +398,7 @@ class ProMediaTool(ctk.CTk, BaseClass):
         ctk.CTkLabel(self.tab_banner, text="HD Banner & Batch Rename", font=("Arial", 14, "bold")).pack(pady=5)
         f = ctk.CTkFrame(self.tab_banner, fg_color="transparent"); f.pack(pady=5)
         ctk.CTkButton(f, text="Select Files", command=lambda: self.select_files("img")).pack(side="left", padx=5)
-        ctk.CTkButton(f, text="Reset", fg_color="#C62828", hover_color="#B71C1C", width=80, command=self.reset_ui).pack(side="left", padx=5)
+        # NO RESET BUTTON
         self.txt_ban = ctk.CTkTextbox(self.tab_banner, height=60, state="disabled")
         self.txt_ban.pack(pady=5, fill="x")
         self.ban_type = ctk.StringVar(value="2day")
