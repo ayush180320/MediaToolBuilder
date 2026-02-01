@@ -14,7 +14,7 @@ from psd_tools import PSDImage
 
 # --- CONFIGURATION ---
 ASSET_DIR = os.path.dirname(os.path.abspath(__file__))
-VERSION = "v14.0 Custom"
+VERSION = "v14 Master"
 COPYRIGHT_OWNER = "Media Studio Pro Inc." 
 YEAR = "2026"
 
@@ -66,13 +66,11 @@ class BatchProcessor(QThread):
 
                 # --- RESIZE LOGIC ---
                 if self.mode == "resize":
-                    # Check if Custom or Preset
                     if self.settings['res'] == "Custom":
                         try:
                             w = int(self.settings['custom_w'])
                             h = int(self.settings['custom_h'])
                         except ValueError:
-                            # Fallback if inputs are bad, though UI checks this
                             w, h = 1000, 1000 
                     else:
                         w, h = map(int, self.settings['res'].split('x'))
@@ -153,7 +151,8 @@ class MediaStudioPro(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"Media Workflow Studio Pro {VERSION}")
-        self.resize(1200, 700)
+        # Default size if user restores down from maximized
+        self.resize(1200, 700) 
         self.setup_styles()
 
         # Ghost Shortcut
@@ -190,7 +189,6 @@ class MediaStudioPro(QMainWindow):
 
         self.tabs = QTabWidget()
         self.setup_tabs()
-        # FEATURE 2: Reset workspace when tab changes
         self.tabs.currentChanged.connect(self.on_tab_changed)
         left_layout.addWidget(self.tabs)
         
@@ -236,7 +234,6 @@ class MediaStudioPro(QMainWindow):
         self.statusBar().showMessage("System Ready")
 
     def show_ghost_copyright(self):
-        # FEATURE 3: Updated Year to 2026
         msg = QMessageBox(self)
         msg.setWindowTitle("About")
         msg.setText(f"<h3>Media Studio Pro {VERSION}</h3>"
@@ -291,13 +288,11 @@ class MediaStudioPro(QMainWindow):
         t2, l2 = create_tab_layout("Smart Resizer", "Resize images to standard dimensions.\nFolder: /_Output_Resized")
         l2.addWidget(QLabel("Select Output Size:"))
         
-        # Resize Combobox
         self.combo_res = QComboBox()
-        self.combo_res.addItems(["286x410", "960x1440", "1920x1080", "380x560", "Custom"]) # Added Custom
+        self.combo_res.addItems(["286x410", "960x1440", "1920x1080", "380x560", "Custom"])
         self.combo_res.currentTextChanged.connect(self.toggle_custom_resize)
         l2.addWidget(self.combo_res)
 
-        # FEATURE 1: Custom Resize Inputs (Hidden by default)
         self.custom_res_container = QWidget()
         custom_layout = QHBoxLayout(self.custom_res_container)
         custom_layout.setContentsMargins(0, 5, 0, 5)
@@ -311,7 +306,7 @@ class MediaStudioPro(QMainWindow):
         custom_layout.addWidget(self.entry_ch)
         
         l2.addWidget(self.custom_res_container)
-        self.custom_res_container.hide() # Initial state: Hidden
+        self.custom_res_container.hide() 
 
         l2.addStretch()
         btn2 = QPushButton("Process Resizing")
@@ -347,16 +342,11 @@ class MediaStudioPro(QMainWindow):
         self.tabs.addTab(t3, "Banner")
 
     # --- LOGIC ---
-
     def toggle_custom_resize(self, text):
-        """Shows/Hides the custom width/height inputs"""
-        if text == "Custom":
-            self.custom_res_container.show()
-        else:
-            self.custom_res_container.hide()
+        if text == "Custom": self.custom_res_container.show()
+        else: self.custom_res_container.hide()
 
     def on_tab_changed(self):
-        """Automatically resets the workspace when tab is switched"""
         self.reset_workspace()
         self.lbl_status.setText("Workspace reset (Tab Switched)")
 
@@ -421,7 +411,6 @@ class MediaStudioPro(QMainWindow):
     def start_batch(self, mode):
         if not self.files: return QMessageBox.warning(self, "No Files", "Please select files first.")
         
-        # Basic Settings
         settings = {
             "res": self.combo_res.currentText(),
             "ban_type": "2day" if self.rad_2day.isChecked() else "3day",
@@ -430,7 +419,6 @@ class MediaStudioPro(QMainWindow):
             "custom_h": self.entry_ch.text()
         }
 
-        # Validation for Custom Resize
         if mode == "resize" and settings['res'] == "Custom":
             if not (settings['custom_w'].isdigit() and settings['custom_h'].isdigit()):
                 return QMessageBox.warning(self, "Invalid Input", "Please enter valid numeric numbers for Width and Height.")
@@ -477,6 +465,8 @@ if __name__ == "__main__":
         app.processEvents()
 
     window = MediaStudioPro()
-    window.show()
+    # THIS LINE MAKES IT FULL SCREEN (MAXIMIZED) AUTOMATICALLY
+    window.showMaximized() 
+    
     splash.finish(window)
     sys.exit(app.exec())
