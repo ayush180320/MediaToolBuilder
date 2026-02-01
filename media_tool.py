@@ -2,7 +2,7 @@
 APPLICATION SECURITY MANIFEST & AUDIT LOG
 -----------------------------------------
 App Name:       Media Workflow Studio Pro
-Version:        5.2 (Reset & Info Panel Fix)
+Version:        5.3 (Hard Reset & Info Panel Layout Fix)
 Author:         Ayush Singhal
 Company:        Deluxe Media
 Purpose:        Local image manipulation.
@@ -40,9 +40,9 @@ class ProMediaTool(ctk.CTk, BaseClass):
     def __init__(self):
         super().__init__()
 
-        self.title("Media Workflow Studio Pro v5.2")
-        self.geometry("1100x720")
-        self.minsize(1100, 720)
+        self.title("Media Workflow Studio Pro v5.3")
+        self.geometry("1100x750")
+        self.minsize(1100, 750)
         
         self.bind("<Control-Alt-a>", self._reveal_author)
         
@@ -68,7 +68,7 @@ class ProMediaTool(ctk.CTk, BaseClass):
         
         # 1. Preview Dropdown
         self.lbl_preview_title = ctk.CTkLabel(self.right_frame, text="Live Preview & Rename", font=("Roboto", 16, "bold"))
-        self.lbl_preview_title.pack(pady=(20, 5))
+        self.lbl_preview_title.pack(pady=(15, 5))
 
         self.preview_selector = ctk.CTkOptionMenu(self.right_frame, dynamic_resizing=False, width=280, command=self.on_selector_change)
         self.preview_selector.set("No Files Selected")
@@ -92,12 +92,16 @@ class ProMediaTool(ctk.CTk, BaseClass):
         self.lbl_final_name = ctk.CTkLabel(self.rename_container, text="Output: ...", text_color="gray", font=("Courier", 11))
         self.lbl_final_name.pack(anchor="w", padx=10, pady=(0,5))
 
-        # 4. File Info Section (Fixed)
-        self.lbl_info_title = ctk.CTkLabel(self.right_frame, text="File Information", font=("Roboto", 12, "bold"), text_color="gray70")
-        self.lbl_info_title.pack(pady=(10, 0), anchor="w", padx=20)
+        # 4. File Info Section (Layout Fixed)
+        # Using pack(side="bottom") ensures it stays visible at the bottom
+        self.info_frame = ctk.CTkFrame(self.right_frame, fg_color="transparent")
+        self.info_frame.pack(side="bottom", fill="x", padx=20, pady=20)
+
+        self.lbl_info_title = ctk.CTkLabel(self.info_frame, text="File Information", font=("Roboto", 12, "bold"), text_color="gray70")
+        self.lbl_info_title.pack(anchor="w")
         
-        self.info_box = ctk.CTkTextbox(self.right_frame, height=80, fg_color="#222222", text_color="#00E5FF", font=("Consolas", 12))
-        self.info_box.pack(fill="x", padx=20, pady=5, side="top")
+        self.info_box = ctk.CTkTextbox(self.info_frame, height=90, fg_color="#222222", text_color="#00E5FF", font=("Consolas", 11))
+        self.info_box.pack(fill="x", pady=5)
         self.info_box.insert("0.0", "Waiting for selection...")
         self.info_box.configure(state="disabled")
 
@@ -122,63 +126,69 @@ class ProMediaTool(ctk.CTk, BaseClass):
         except: base_path = os.path.abspath(".")
         return os.path.join(base_path, relative_path)
 
-    # --- FIXED RESET ENGINE ---
+    # --- HARD RESET ENGINE ---
     def reset_ui(self):
-        """Resets the UI and ensures it is UNLOCKED for next use"""
-        self.file_list = []
-        self.file_names = []
-        self.custom_names_map = {}
-        self.current_preview_path = None
-        
-        # 1. Reset Selector
-        self.preview_selector.configure(state="normal") 
-        self.preview_selector.set("No Files Selected")
-        self.preview_selector.configure(values=["No Files Selected"])
-        self.preview_selector.configure(state="disabled")
+        """Forcefully unlocks and wipes all UI elements."""
+        try:
+            # 1. Reset Internal Data
+            self.file_list = []
+            self.file_names = []
+            self.custom_names_map = {}
+            self.current_preview_path = None
+            self.current_ctk_image = None
+            
+            # 2. Reset Selector
+            self.preview_selector.configure(state="normal") 
+            self.preview_selector.set("No Files Selected")
+            self.preview_selector.configure(values=["No Files Selected"])
+            self.preview_selector.configure(state="disabled")
 
-        # 2. Reset Visuals
-        self.lbl_preview_img.configure(image=None, text="[Drag Files Here]")
-        self.entry_manual_name.delete(0, "end")
-        self.lbl_final_name.configure(text="Output: ...")
-        
-        # 3. Reset Info Box (Unlock -> Clear -> Lock)
-        self.info_box.configure(state="normal")
-        self.info_box.delete("0.0", "end")
-        self.info_box.insert("0.0", "Waiting for selection...")
-        self.info_box.configure(state="disabled")
-        
-        # 4. Reset Text Boxes
-        for txt in [self.txt_psd, self.txt_res, self.txt_ban]:
-            txt.configure(state="normal")
-            txt.delete("0.0", "end")
-            txt.configure(state="disabled")
+            # 3. Reset Visuals
+            self.lbl_preview_img.configure(image=None, text="[Drag Files Here]")
+            self.entry_manual_name.delete(0, "end")
+            self.lbl_final_name.configure(text="Output: ...")
+            
+            # 4. Reset Info Box (Critical: Unlock -> Delete -> Insert -> Lock)
+            self.info_box.configure(state="normal")
+            self.info_box.delete("0.0", "end")
+            self.info_box.insert("0.0", "Waiting for selection...")
+            self.info_box.configure(state="disabled")
+            
+            # 5. Reset Tab Text Boxes
+            for txt in [self.txt_psd, self.txt_res, self.txt_ban]:
+                txt.configure(state="normal")
+                txt.delete("0.0", "end")
+                txt.configure(state="disabled")
+                
+        except Exception as e:
+            print(f"Reset Error (Non-Fatal): {e}")
 
     def on_tab_switch(self):
         self.reset_ui()
 
-    # --- FIXED INPUT HANDLING ---
+    # --- INPUT HANDLING ---
     def handle_files_input(self, files):
         if not files: return
         
-        # 1. Reset UI first to ensure clean state
+        # 1. Clean Slate (Soft Reset)
         self.reset_ui()
         
         # 2. Load New Data
         self.file_list = list(files)
         self.file_names = [os.path.basename(f) for f in files]
         
-        # 3. Initialize Names Map
+        # 3. Initialize Map
         self.custom_names_map = {}
         for f in files:
             base = os.path.splitext(os.path.basename(f))[0]
             self.custom_names_map[f] = base
 
-        # 4. Wake up Selector
+        # 4. Activate Selector
         self.preview_selector.configure(state="normal")
         self.preview_selector.configure(values=self.file_names)
         self.preview_selector.set(self.file_names[0])
         
-        # 5. Populate File List Box
+        # 5. Populate Active Text Box
         active = self.tab_view.get()
         target_box = self.txt_psd if active == "PSD Bulk Converter" else (self.txt_res if active == "Smart Resizer" else self.txt_ban)
         
@@ -187,10 +197,10 @@ class ProMediaTool(ctk.CTk, BaseClass):
         for f in self.file_names: target_box.insert("end", f"{f}\n")
         target_box.configure(state="disabled")
 
-        # 6. Load First Item & Info
+        # 6. Load First Item
         self.current_preview_path = self.file_list[0]
         
-        # Sequence is critical here
+        # Force updates immediately
         self.update_rename_fields() 
         self.update_preview_logic()
         self.update_file_info(self.current_preview_path)
@@ -206,38 +216,37 @@ class ProMediaTool(ctk.CTk, BaseClass):
             self.update_file_info(self.current_preview_path)
         except ValueError: pass
 
-    # --- FILE INFO ENGINE ---
+    # --- FILE INFO ENGINE (FIXED) ---
     def update_file_info(self, filepath):
-        """Updates the info box with technical details"""
         if not filepath: return
-
-        txt = "Reading metadata..."
+        
+        txt = "Reading..."
         try:
-            size_mb = os.path.getsize(filepath) / (1024 * 1024)
+            # File Size
+            size_bytes = os.path.getsize(filepath)
+            size_str = f"{size_bytes / 1024:.1f} KB" if size_bytes < 1024*1024 else f"{size_bytes / (1024*1024):.2f} MB"
             
             if filepath.lower().endswith(".psd"):
                 psd = PSDImage.open(filepath)
                 w, h = psd.width, psd.height
-                fmt = "PSD (Adobe Photoshop)"
-                mode = psd.color_mode
-                layers = len(psd)
-                details = f"Layers: {layers}"
+                fmt = "PSD"
+                details = f"Layers: {len(psd)}"
             else:
                 img = Image.open(filepath)
                 w, h = img.size
                 fmt = img.format if img.format else "Image"
-                mode = img.mode
-                details = f"DPI: {img.info.get('dpi', 'N/A')}"
+                details = f"Mode: {img.mode}"
 
+            # Create clean output string
             txt = (f"File: {os.path.basename(filepath)}\n"
-                   f"Dimensions: {w} x {h} px\n"
-                   f"Type: {fmt} | Mode: {mode}\n"
-                   f"Size: {size_mb:.2f} MB\n"
-                   f"Details: {details}")
+                   f"Resolution: {w} x {h}\n"
+                   f"Type: {fmt}  |  Size: {size_str}\n"
+                   f"Info: {details}")
 
         except Exception as e:
-            txt = f"Error reading file info:\n{str(e)}"
+            txt = f"Could not read file info.\n{e}"
 
+        # Unlock -> Update -> Lock
         self.info_box.configure(state="normal")
         self.info_box.delete("0.0", "end")
         self.info_box.insert("0.0", txt)
