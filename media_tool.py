@@ -2,7 +2,7 @@
 APPLICATION SECURITY MANIFEST & AUDIT LOG
 -----------------------------------------
 App Name:       Media Workflow Studio Pro
-Version:        4.2 (Smart Auto-Suffix Logic)
+Version:        5.0 (Manual Rename & Fixed Reset)
 Author:         Ayush Singhal
 Company:        Deluxe Media
 Purpose:        Local image manipulation.
@@ -40,10 +40,9 @@ class ProMediaTool(ctk.CTk, BaseClass):
     def __init__(self):
         super().__init__()
 
-        self.title("Media Workflow Studio Pro v4.2")
-        # Fixed Height: 650px to ensure buttons don't get cut off
-        self.geometry("1100x650")
-        self.minsize(1100, 650)
+        self.title("Media Workflow Studio Pro v5.0")
+        self.geometry("1100x700") # Increased height for rename controls
+        self.minsize(1100, 700)
         
         self.bind("<Control-Alt-a>", self._reveal_author)
         
@@ -67,7 +66,8 @@ class ProMediaTool(ctk.CTk, BaseClass):
         self.right_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="#1a1a1a")
         self.right_frame.grid(row=0, column=1, sticky="nsew", padx=(0,10), pady=10)
         
-        self.lbl_preview_title = ctk.CTkLabel(self.right_frame, text="Live Preview", font=("Roboto", 16, "bold"))
+        # Preview Dropdown
+        self.lbl_preview_title = ctk.CTkLabel(self.right_frame, text="Live Preview & Rename", font=("Roboto", 16, "bold"))
         self.lbl_preview_title.pack(pady=(20, 5))
 
         self.preview_selector = ctk.CTkOptionMenu(self.right_frame, dynamic_resizing=False, width=280, command=self.on_selector_change)
@@ -75,13 +75,28 @@ class ProMediaTool(ctk.CTk, BaseClass):
         self.preview_selector.configure(state="disabled")
         self.preview_selector.pack(pady=5)
         
+        # Preview Image
         self.lbl_preview_img = ctk.CTkLabel(self.right_frame, text="[Drag Files Here]", width=286, height=410, fg_color="#2b2b2b", corner_radius=10)
         self.lbl_preview_img.pack(pady=10, padx=20)
+
+        # --- ONE-BY-ONE RENAME SECTION ---
+        self.rename_container = ctk.CTkFrame(self.right_frame, fg_color="#222222")
+        self.rename_container.pack(fill="x", padx=20, pady=5)
+        
+        ctk.CTkLabel(self.rename_container, text="Edit Filename (For current selection):", font=("Arial", 11)).pack(anchor="w", padx=10, pady=(5,0))
+        
+        self.entry_manual_name = ctk.CTkEntry(self.rename_container, placeholder_text="Filename without extension")
+        self.entry_manual_name.pack(fill="x", padx=10, pady=5)
+        self.entry_manual_name.bind("<KeyRelease>", self.on_manual_rename_type) # Live update
+        
+        self.lbl_final_name = ctk.CTkLabel(self.rename_container, text="Output: ...", text_color="gray", font=("Courier", 11))
+        self.lbl_final_name.pack(anchor="w", padx=10, pady=(0,5))
+        # ----------------------------------
 
         self.lbl_info_title = ctk.CTkLabel(self.right_frame, text="File Information", font=("Roboto", 12, "bold"), text_color="gray70")
         self.lbl_info_title.pack(pady=(10, 0), anchor="w", padx=20)
         
-        self.info_box = ctk.CTkTextbox(self.right_frame, height=80, fg_color="#222222", text_color="#00E5FF")
+        self.info_box = ctk.CTkTextbox(self.right_frame, height=60, fg_color="#222222", text_color="#00E5FF")
         self.info_box.pack(fill="x", padx=20, pady=5, side="top")
         self.info_box.insert("0.0", "Waiting for selection...")
         self.info_box.configure(state="disabled")
@@ -89,6 +104,7 @@ class ProMediaTool(ctk.CTk, BaseClass):
         # Internal State
         self.file_list = []
         self.file_names = []
+        self.custom_names_map = {} # Stores {filepath: new_name}
         self.current_preview_path = None
         
         self._setup_psd_tab()
@@ -105,25 +121,32 @@ class ProMediaTool(ctk.CTk, BaseClass):
         except: base_path = os.path.abspath(".")
         return os.path.join(base_path, relative_path)
 
-    # --- RESET ENGINE ---
+    # --- RESET ENGINE (FIXED) ---
     def reset_ui(self):
-        """Completely clears state to allow fresh inputs"""
+        """Resets everything to pristine state"""
         self.file_list = []
         self.file_names = []
+        self.custom_names_map = {}
         self.current_preview_path = None
         
+        # 1. Reset Selector (Sequence is important to prevent getting stuck)
         self.preview_selector.configure(state="normal") 
         self.preview_selector.set("No Files Selected")
         self.preview_selector.configure(values=["No Files Selected"])
         self.preview_selector.configure(state="disabled")
 
+        # 2. Reset Visuals
         self.lbl_preview_img.configure(image=None, text="[Drag Files Here]")
+        self.entry_manual_name.delete(0, "end")
+        self.lbl_final_name.configure(text="Output: ...")
         
+        # 3. Reset Info Box
         self.info_box.configure(state="normal")
         self.info_box.delete("0.0", "end")
         self.info_box.insert("0.0", "Waiting for selection...")
         self.info_box.configure(state="disabled")
         
+        # 4. Reset Tab Inputs
         for txt in [self.txt_psd, self.txt_res, self.txt_ban]:
             txt.configure(state="normal")
             txt.delete("0.0", "end")
@@ -135,14 +158,23 @@ class ProMediaTool(ctk.CTk, BaseClass):
     # --- INPUT HANDLING ---
     def handle_files_input(self, files):
         if not files: return
+        
+        # 1. Store Data
         self.file_list = files
         self.file_names = [os.path.basename(f) for f in files]
         
-        # Wake up selector
-        self.preview_selector.configure(state="normal", values=self.file_names)
+        # 2. Initialize Custom Names Map (Default to original name)
+        self.custom_names_map = {}
+        for f in files:
+            base = os.path.splitext(os.path.basename(f))[0]
+            self.custom_names_map[f] = base
+
+        # 3. Wake up Selector
+        self.preview_selector.configure(state="normal")
+        self.preview_selector.configure(values=self.file_names)
         self.preview_selector.set(self.file_names[0])
         
-        # Update text box
+        # 4. Update Text Box
         active = self.tab_view.get()
         target_box = self.txt_psd if active == "PSD Bulk Converter" else (self.txt_res if active == "Smart Resizer" else self.txt_ban)
         
@@ -151,8 +183,9 @@ class ProMediaTool(ctk.CTk, BaseClass):
         for f in self.file_names: target_box.insert("end", f"{f}\n")
         target_box.configure(state="disabled")
 
-        # Force Preview
+        # 5. Load First Item
         self.current_preview_path = self.file_list[0]
+        self.update_rename_fields() # Populate the rename box
         self.update_preview_logic()
         self.update_file_info(self.current_preview_path)
 
@@ -161,10 +194,39 @@ class ProMediaTool(ctk.CTk, BaseClass):
         try:
             index = self.file_names.index(selected_filename)
             self.current_preview_path = self.file_list[index]
+            self.update_rename_fields() # Sync rename box to new selection
             self.update_preview_logic()
             self.update_file_info(self.current_preview_path)
         except ValueError: pass
 
+    # --- RENAME LOGIC ---
+    def update_rename_fields(self):
+        """Populate the rename entry with stored value for this file"""
+        if not self.current_preview_path: return
+        
+        stored_name = self.custom_names_map.get(self.current_preview_path, "")
+        
+        self.entry_manual_name.delete(0, "end")
+        self.entry_manual_name.insert(0, stored_name)
+        self._update_suffix_label(stored_name)
+
+    def on_manual_rename_type(self, event):
+        """Save text to memory as user types"""
+        if not self.current_preview_path: return
+        
+        new_name = self.entry_manual_name.get()
+        self.custom_names_map[self.current_preview_path] = new_name
+        self._update_suffix_label(new_name)
+
+    def _update_suffix_label(self, name):
+        """Shows user what the final file will look like"""
+        if self.tab_view.get() == "HD Banner & Rename":
+            suffix = "2DayBanner_286x410" if self.ban_type.get() == "2day" else "3DayBanner_286x410"
+            self.lbl_final_name.configure(text=f"Output: {name}_{suffix}.jpg")
+        else:
+            self.lbl_final_name.configure(text=f"Output: {name}.jpg")
+
+    # --- DRAG & DROP ---
     def drop_files_handler(self, event):
         raw_files = event.data
         if "{" in raw_files:
@@ -179,7 +241,7 @@ class ProMediaTool(ctk.CTk, BaseClass):
         files = filedialog.askopenfilenames(filetypes=ft)
         if files: self.handle_files_input(files)
 
-    # --- FILE INFO ENGINE ---
+    # --- FILE INFO ---
     def update_file_info(self, filepath):
         txt = "Reading..."
         try:
@@ -192,9 +254,9 @@ class ProMediaTool(ctk.CTk, BaseClass):
                 w, h = img.size
                 fmt = img.format if img.format else "Image"
                 mode = img.mode
-            txt = f"File: {os.path.basename(filepath)}\nDim: {w}x{h}\nType: {fmt} | {mode}\nSize: {size_mb:.2f} MB"
+            txt = f"Dim: {w}x{h} | Type: {fmt}\nSize: {size_mb:.2f} MB"
         except Exception as e:
-            txt = f"Metadata Error:\n{str(e)}"
+            txt = f"Error: {str(e)}"
 
         self.info_box.configure(state="normal")
         self.info_box.delete("0.0", "end")
@@ -222,6 +284,10 @@ class ProMediaTool(ctk.CTk, BaseClass):
                     banner = Image.open(tpl_path).convert("RGBA").resize((286, 410), Image.Resampling.LANCZOS)
                     canvas.paste(banner, (0, 0), mask=banner)
                     img = canvas
+                
+                # Update label in case radio button changed
+                stored = self.custom_names_map.get(self.current_preview_path, "")
+                self._update_suffix_label(stored)
 
             img.thumbnail((286, 410), Image.Resampling.LANCZOS)
             ctk_img = ctk.CTkImage(img, size=img.size)
@@ -300,13 +366,7 @@ class ProMediaTool(ctk.CTk, BaseClass):
         self.txt_ban = ctk.CTkTextbox(self.tab_banner, height=60, state="disabled")
         self.txt_ban.pack(pady=5, fill="x")
         
-        # --- BATCH RENAME UI (Streamlined) ---
-        rename_frame = ctk.CTkFrame(self.tab_banner, fg_color="#2b2b2b")
-        rename_frame.pack(fill="x", pady=10, padx=10)
-        
-        # Explanatory Label
-        ctk.CTkLabel(rename_frame, text="Naming Convention:", font=("Arial", 11, "bold"), text_color="gray").pack(pady=(5,0))
-        ctk.CTkLabel(rename_frame, text="{OriginalName}_{BannerType}_{286x410}.jpg", font=("Courier", 12, "bold"), text_color="#00E5FF").pack(pady=(0,5))
+        ctk.CTkLabel(self.tab_banner, text="Use the panel on the RIGHT to rename files individually.", text_color="gray").pack(pady=5)
 
         self.ban_type = ctk.StringVar(value="2day")
         r = ctk.CTkFrame(self.tab_banner); r.pack(pady=5)
@@ -338,14 +398,11 @@ class ProMediaTool(ctk.CTk, BaseClass):
                 banner = Image.open(tpl_path).convert("RGBA").resize((286, 410), Image.Resampling.LANCZOS)
                 canvas.paste(banner, (0, 0), mask=banner)
                 
-                # RENAMING LOGIC (Preserves Individual Filenames)
-                # 1. Get original filename without extension (e.g. "Matrix")
-                base_name = os.path.splitext(os.path.basename(fpath))[0]
+                # RETRIEVE CUSTOM NAME (Or use default if map failed)
+                base_name = self.custom_names_map.get(fpath, os.path.splitext(os.path.basename(fpath))[0])
                 
-                # 2. Define Suffix
+                # Define Suffix
                 suffix = "2DayBanner_286x410" if self.ban_type.get() == "2day" else "3DayBanner_286x410"
-                
-                # 3. Combine -> "Matrix_2DayBanner_286x410.jpg"
                 fname = f"{base_name}_{suffix}.jpg"
                     
                 self.save_image_pro(canvas, os.path.join(out_dir, fname), dpi)
