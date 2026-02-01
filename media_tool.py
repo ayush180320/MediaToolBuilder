@@ -2,7 +2,7 @@
 APPLICATION SECURITY MANIFEST & AUDIT LOG
 -----------------------------------------
 App Name:       Media Workflow Studio Pro
-Version:        5.7 (State Lock Fix & Direct Trigger)
+Version:        5.8 (Hard State Refresh)
 Author:         Ayush Singhal
 Company:        Deluxe Media
 Purpose:        Local image manipulation.
@@ -30,7 +30,6 @@ except ImportError:
         class DnDWrapper:
             pass
 
-# --- Configuration ---
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("dark-blue")
 
@@ -40,24 +39,20 @@ class ProMediaTool(ctk.CTk, BaseClass):
     def __init__(self):
         super().__init__()
 
-        self.title("Media Workflow Studio Pro v5.7")
+        self.title("Media Workflow Studio Pro v5.8")
         self.geometry("1100x750")
         self.minsize(1100, 750)
         
         self.bind("<Control-Alt-a>", self._reveal_author)
         
-        # --- Layout Grid ---
-        self.grid_columnconfigure(0, weight=4) # Left Panel
-        self.grid_columnconfigure(1, weight=5) # Right Panel
+        self.grid_columnconfigure(0, weight=4)
+        self.grid_columnconfigure(1, weight=5)
         self.grid_rowconfigure(0, weight=1)
 
-        # ============================================================
-        # === LEFT PANEL: CONTROLS & RENAME ==========================
-        # ============================================================
+        # === LEFT PANEL ===
         self.left_frame = ctk.CTkFrame(self, corner_radius=0)
         self.left_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
 
-        # 1. Main Operation Tabs
         self.tab_view = ctk.CTkTabview(self.left_frame, command=self.on_tab_switch)
         self.tab_view.pack(fill="both", expand=True, padx=10, pady=10)
 
@@ -65,12 +60,11 @@ class ProMediaTool(ctk.CTk, BaseClass):
         self.tab_resize = self.tab_view.add("Smart Resizer")
         self.tab_banner = self.tab_view.add("HD Banner & Rename")
 
-        # 2. Rename Section (Left Side)
+        # Rename Section
         self.rename_frame = ctk.CTkFrame(self.left_frame, fg_color="#2b2b2b", border_color="gray", border_width=1)
         self.rename_frame.pack(fill="x", padx=10, pady=20, side="bottom")
 
         ctk.CTkLabel(self.rename_frame, text="RENAME SELECTED FILE", font=("Roboto", 12, "bold")).pack(pady=(10,5))
-        
         self.lbl_rename_target = ctk.CTkLabel(self.rename_frame, text="No file selected", text_color="gray")
         self.lbl_rename_target.pack(pady=2)
 
@@ -81,16 +75,14 @@ class ProMediaTool(ctk.CTk, BaseClass):
         self.lbl_final_name = ctk.CTkLabel(self.rename_frame, text="Output: ...", text_color="#00E5FF", font=("Consolas", 11))
         self.lbl_final_name.pack(anchor="w", padx=15, pady=(0,10))
 
-        # ============================================================
-        # === RIGHT PANEL: PREVIEW & INFO ============================
-        # ============================================================
+        # === RIGHT PANEL ===
         self.right_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="#1a1a1a")
         self.right_frame.grid(row=0, column=1, sticky="nsew", padx=(0,10), pady=10)
         
-        # 1. Preview Header & Selector
         self.lbl_preview_title = ctk.CTkLabel(self.right_frame, text="Live Preview", font=("Roboto", 18, "bold"))
         self.lbl_preview_title.pack(pady=(15, 5))
 
+        # NEW STRATEGY: StringVar control
         self.selector_var = ctk.StringVar(value="No Files Selected")
         self.preview_selector = ctk.CTkOptionMenu(
             self.right_frame, 
@@ -101,11 +93,9 @@ class ProMediaTool(ctk.CTk, BaseClass):
         )
         self.preview_selector.pack(pady=5)
         
-        # 2. The Image
         self.lbl_preview_img = ctk.CTkLabel(self.right_frame, text="[Drag Files Here]", width=286, height=410, fg_color="#222222", corner_radius=10)
         self.lbl_preview_img.pack(pady=10, padx=20)
 
-        # 3. File Info Section (Under Preview)
         self.info_container = ctk.CTkFrame(self.right_frame, fg_color="transparent")
         self.info_container.pack(fill="both", expand=True, padx=20, pady=10)
 
@@ -116,13 +106,11 @@ class ProMediaTool(ctk.CTk, BaseClass):
         self.info_box.insert("0.0", "Waiting for input...")
         self.info_box.configure(state="disabled")
 
-        # ============================================================
-        # Internal State
+        # === STATE VARIABLES ===
         self.file_list = []
         self.file_names = []
         self.custom_names_map = {} 
         self.current_preview_path = None
-        self.current_ctk_image = None 
         
         self._setup_psd_tab()
         self._setup_resize_tab()
@@ -139,198 +127,171 @@ class ProMediaTool(ctk.CTk, BaseClass):
         return os.path.join(base_path, relative_path)
 
     # ============================================================
-    # === CRITICAL FIX: RESET LOGIC ==============================
+    # === NEW WAY: DIRECT STATE REFRESH ==========================
     # ============================================================
     def reset_ui(self):
         """
-        FIXED RESET:
-        We do NOT disable the selector anymore. We just clear the list.
-        Disabling it caused the 'zombie' state when trying to reload.
+        Clears DATA ONLY. Does not lock widgets.
+        This keeps the 'connection' alive.
         """
-        try:
-            # 1. Reset Internal State
-            self.file_list = []
-            self.file_names = []
-            self.custom_names_map = {}
-            self.current_preview_path = None
-            self.current_ctk_image = None
-            
-            # 2. Reset Selector (KEEP ACTIVE)
-            self.selector_var.set("No Files Selected")
-            self.preview_selector.configure(values=["No Files Selected"])
-            # DO NOT DISABLE HERE - This was the bug source
+        # 1. Clear Data
+        self.file_list = []
+        self.file_names = []
+        self.custom_names_map = {}
+        self.current_preview_path = None
 
-            # 3. Reset Visuals
-            self.lbl_preview_img.configure(image=None, text="[Drag Files Here]")
-            self.lbl_rename_target.configure(text="No file selected")
-            
-            self.entry_manual_name.delete(0, "end")
-            self.lbl_final_name.configure(text="Output: ...")
-            
-            # 4. Clear Text Boxes (Unlock -> Clear -> Lock)
-            self.info_box.configure(state="normal")
-            self.info_box.delete("0.0", "end")
-            self.info_box.insert("0.0", "Waiting for input...")
-            self.info_box.configure(state="disabled")
-            
-            for txt in [self.txt_psd, self.txt_res, self.txt_ban]:
-                txt.configure(state="normal")
-                txt.delete("0.0", "end")
-                txt.configure(state="disabled")
-                
-            self.update_idletasks()
-            
-        except Exception as e:
-            print(f"Reset Exception: {e}")
+        # 2. Reset Dropdown (BUT KEEP IT ACTIVE)
+        self.selector_var.set("No Files Selected")
+        self.preview_selector.configure(values=["No Files Selected"])
+        
+        # 3. Clear Visuals
+        self.lbl_preview_img.configure(image=None, text="[Drag Files Here]")
+        self.lbl_rename_target.configure(text="No file selected")
+        self.entry_manual_name.delete(0, "end")
+        self.lbl_final_name.configure(text="Output: ...")
+        
+        # 4. Clear Info Box
+        self.info_box.configure(state="normal")
+        self.info_box.delete("0.0", "end")
+        self.info_box.insert("0.0", "Waiting for input...")
+        self.info_box.configure(state="disabled")
+
+        # 5. Clear Text Boxes
+        for txt in [self.txt_psd, self.txt_res, self.txt_ban]:
+            txt.configure(state="normal")
+            txt.delete("0.0", "end")
+            txt.configure(state="disabled")
 
     def on_tab_switch(self):
-        # Optional: auto-reset on tab switch. 
-        # Comment this line out if you want to keep files when switching tabs.
         self.reset_ui()
 
-    # ============================================================
-    # === LOADING NEW FILES ======================================
-    # ============================================================
     def handle_files_input(self, files):
         if not files: return
-        
-        # 1. Clean old data first
+
+        # 1. Clear old data manually
         self.reset_ui()
-        
-        # 2. Load New Data
+
+        # 2. Ingest New Data
         self.file_list = list(files)
         self.file_names = [os.path.basename(f) for f in files]
-        
-        self.custom_names_map = {}
         for f in files:
-            base = os.path.splitext(os.path.basename(f))[0]
-            self.custom_names_map[f] = base
+            self.custom_names_map[f] = os.path.splitext(os.path.basename(f))[0]
 
-        # 3. Update Selector (Safe Mode)
-        # We update the values list and set the variable explicitly
+        # 3. Force Dropdown Update
+        # We set values first, then the variable.
         self.preview_selector.configure(values=self.file_names)
         self.selector_var.set(self.file_names[0])
-        
-        # 4. Update Text Box List
-        active = self.tab_view.get()
-        target_box = self.txt_psd if active == "PSD Bulk Converter" else (self.txt_res if active == "Smart Resizer" else self.txt_ban)
-        
-        target_box.configure(state="normal")
-        target_box.delete("0.0", "end")
-        for f in self.file_names: target_box.insert("end", f"{f}\n")
-        target_box.configure(state="disabled")
 
-        # 5. DIRECT PREVIEW TRIGGER (Bypassing dropdown callback for reliability)
-        self.current_preview_path = self.file_list[0]
+        # 4. Populate List Box
+        active_box = self.txt_psd
+        if self.tab_view.get() == "Smart Resizer": active_box = self.txt_res
+        elif self.tab_view.get() == "HD Banner & Rename": active_box = self.txt_ban
         
-        # Call update functions directly
-        self.update_rename_fields() 
-        self.update_preview_logic()
-        self.update_file_info(self.current_preview_path)
+        active_box.configure(state="normal")
+        for f in self.file_names: active_box.insert("end", f"{f}\n")
+        active_box.configure(state="disabled")
+
+        # 5. DIRECT INJECTION (The "New Way")
+        # We do NOT rely on the dropdown callback. We call the logic directly.
+        self.current_preview_path = self.file_list[0]
+        self.refresh_all_panels()
 
     def on_selector_change(self, selected_filename):
+        """Called only when USER clicks the dropdown"""
         if selected_filename == "No Files Selected" or not self.file_list: return
         try:
             index = self.file_names.index(selected_filename)
             self.current_preview_path = self.file_list[index]
-            
-            self.update_rename_fields() 
-            self.update_preview_logic()
-            self.update_file_info(self.current_preview_path)
-        except ValueError: pass
+            self.refresh_all_panels()
+        except: pass
 
-    # ============================================================
-    # === INFO & PREVIEW LOGIC ===================================
-    # ============================================================
-    def update_file_info(self, filepath):
-        if not filepath: return
-        
-        txt = "Reading..."
-        try:
-            size_bytes = os.path.getsize(filepath)
-            size_str = f"{size_bytes / 1024:.1f} KB" if size_bytes < 1024*1024 else f"{size_bytes / (1024*1024):.2f} MB"
-            
-            if filepath.lower().endswith(".psd"):
-                psd = PSDImage.open(filepath)
-                w, h = psd.width, psd.height
-                fmt = "PSD (Adobe)"
-                mode = psd.color_mode
-            else:
-                img = Image.open(filepath)
-                w, h = img.size
-                fmt = img.format if img.format else "Image"
-                mode = img.mode
-
-            txt = (f"File: {os.path.basename(filepath)}\n"
-                   f"Dimensions: {w} x {h}\n"
-                   f"Format: {fmt}  |  Mode: {mode}\n"
-                   f"File Size: {size_str}")
-
-        except Exception as e:
-            txt = f"Could not read file info.\n{e}"
-
-        self.info_box.configure(state="normal")
-        self.info_box.delete("0.0", "end")
-        self.info_box.insert("0.0", txt)
-        self.info_box.configure(state="disabled")
-
-    def update_rename_fields(self):
+    def refresh_all_panels(self):
+        """Central hub to update all UI panels"""
         if not self.current_preview_path: return
+        
+        # Update 1: Rename Fields
         try:
             self.lbl_rename_target.configure(text=f"Editing: {os.path.basename(self.current_preview_path)}")
-            
             stored_name = self.custom_names_map.get(self.current_preview_path, "")
             self.entry_manual_name.delete(0, "end")
             self.entry_manual_name.insert(0, stored_name)
             self._update_suffix_label(stored_name)
         except: pass
 
-    def on_manual_rename_type(self, event):
-        if not self.current_preview_path: return
-        new_name = self.entry_manual_name.get()
-        self.custom_names_map[self.current_preview_path] = new_name
-        self._update_suffix_label(new_name)
+        # Update 2: File Info
+        self.update_file_info(self.current_preview_path)
 
-    def _update_suffix_label(self, name):
-        if self.tab_view.get() == "HD Banner & Rename":
-            suffix = "2DayBanner_286x410" if self.ban_type.get() == "2day" else "3DayBanner_286x410"
-            self.lbl_final_name.configure(text=f"Output: {name}_{suffix}.jpg")
-        else:
-            self.lbl_final_name.configure(text=f"Output: {name}.jpg")
+        # Update 3: Image Preview
+        self.update_preview_image()
 
-    def update_preview_logic(self):
-        if not self.current_preview_path: return
+    # ============================================================
+    # === CORE LOGIC =============================================
+    # ============================================================
+    def update_file_info(self, filepath):
+        txt = "Reading..."
+        try:
+            size = os.path.getsize(filepath)
+            size_str = f"{size/1024:.1f} KB" if size < 1024*1024 else f"{size/(1024*1024):.2f} MB"
+            
+            if filepath.lower().endswith(".psd"):
+                p = PSDImage.open(filepath)
+                dim = f"{p.width} x {p.height}"
+                fmt = "PSD"
+            else:
+                i = Image.open(filepath)
+                dim = f"{i.size[0]} x {i.size[1]}"
+                fmt = i.format
+            
+            txt = f"File: {os.path.basename(filepath)}\nDimensions: {dim}\nFormat: {fmt}\nSize: {size_str}"
+        except Exception as e:
+            txt = f"Error reading info:\n{e}"
+
+        self.info_box.configure(state="normal")
+        self.info_box.delete("0.0", "end")
+        self.info_box.insert("0.0", txt)
+        self.info_box.configure(state="disabled")
+
+    def update_preview_image(self):
         try:
             if self.current_preview_path.lower().endswith(".psd"):
-                psd = PSDImage.open(self.current_preview_path)
-                img = psd.composite()
+                img = PSDImage.open(self.current_preview_path).composite()
             else:
                 img = Image.open(self.current_preview_path)
 
+            # Banner Logic
             if self.tab_view.get() == "HD Banner & Rename":
                 img = img.resize((286, 371), Image.Resampling.LANCZOS)
                 canvas = Image.new("RGB", (286, 410), (255, 255, 255))
-                canvas.paste(img, (0, 0))
+                canvas.paste(img, (0,0))
                 
                 tpl = "banner_2day.png" if self.ban_type.get() == "2day" else "banner_3day.png"
                 tpl_path = self.resource_path(tpl)
                 if os.path.exists(tpl_path):
-                    banner = Image.open(tpl_path).convert("RGBA").resize((286, 410), Image.Resampling.LANCZOS)
-                    canvas.paste(banner, (0, 0), mask=banner)
+                    ovl = Image.open(tpl_path).convert("RGBA").resize((286,410), Image.Resampling.LANCZOS)
+                    canvas.paste(ovl, (0,0), mask=ovl)
                     img = canvas
-                
-                stored = self.custom_names_map.get(self.current_preview_path, "")
-                self._update_suffix_label(stored)
 
             img.thumbnail((286, 410), Image.Resampling.LANCZOS)
-            self.current_ctk_image = ctk.CTkImage(img, size=img.size) 
-            self.lbl_preview_img.configure(image=self.current_ctk_image, text="")
-            
+            self.tk_img = ctk.CTkImage(img, size=img.size)
+            self.lbl_preview_img.configure(image=self.tk_img, text="")
         except Exception as e:
-            self.lbl_preview_img.configure(image=None, text=f"Preview Failed\n{str(e)}")
+            self.lbl_preview_img.configure(image=None, text="Preview Error")
+
+    def on_manual_rename_type(self, event):
+        if not self.current_preview_path: return
+        name = self.entry_manual_name.get()
+        self.custom_names_map[self.current_preview_path] = name
+        self._update_suffix_label(name)
+
+    def _update_suffix_label(self, name):
+        if self.tab_view.get() == "HD Banner & Rename":
+            suf = "2DayBanner_286x410" if self.ban_type.get() == "2day" else "3DayBanner_286x410"
+            self.lbl_final_name.configure(text=f"Output: {name}_{suf}.jpg")
+        else:
+            self.lbl_final_name.configure(text=f"Output: {name}.jpg")
 
     def refresh_preview(self):
-        self.update_preview_logic()
+        self.refresh_all_panels()
 
     def save_image_pro(self, img, path, dpi=(72,72)):
         if img.mode in ("RGBA", "P", "CMYK"): img = img.convert("RGB")
@@ -354,13 +315,9 @@ class ProMediaTool(ctk.CTk, BaseClass):
     # --- TABS ---
     def _setup_psd_tab(self):
         ctk.CTkLabel(self.tab_psd, text="PSD Bulk Converter", font=("Arial", 14, "bold")).pack(pady=5)
-        btn_frame = ctk.CTkFrame(self.tab_psd, fg_color="transparent")
-        btn_frame.pack(pady=5)
-        ctk.CTkButton(btn_frame, text="Select Files", command=lambda: self.select_files("psd")).pack(side="left", padx=5)
-        
-        # RESET
-        ctk.CTkButton(btn_frame, text="Reset", fg_color="#C62828", hover_color="#B71C1C", width=80, command=self.reset_ui).pack(side="left", padx=5)
-        
+        f = ctk.CTkFrame(self.tab_psd, fg_color="transparent"); f.pack(pady=5)
+        ctk.CTkButton(f, text="Select Files", command=lambda: self.select_files("psd")).pack(side="left", padx=5)
+        ctk.CTkButton(f, text="Reset", fg_color="#C62828", hover_color="#B71C1C", width=80, command=self.reset_ui).pack(side="left", padx=5)
         self.txt_psd = ctk.CTkTextbox(self.tab_psd, height=150, state="disabled")
         self.txt_psd.pack(pady=5, fill="x")
         ctk.CTkButton(self.tab_psd, text="Convert All", fg_color="green", command=lambda: threading.Thread(target=self._process_psd, daemon=True).start()).pack(pady=10)
@@ -370,24 +327,20 @@ class ProMediaTool(ctk.CTk, BaseClass):
         count = 0
         for f in self.file_list:
             try:
-                out_dir = os.path.join(os.path.dirname(f), "Converted_PSD")
-                os.makedirs(out_dir, exist_ok=True)
+                out = os.path.join(os.path.dirname(f), "Converted_PSD")
+                os.makedirs(out, exist_ok=True)
                 psd = PSDImage.open(f)
-                out_path = os.path.join(out_dir, os.path.basename(os.path.splitext(f)[0] + ".jpg"))
-                self.save_image_pro(psd.composite(), out_path)
+                save_p = os.path.join(out, os.path.basename(os.path.splitext(f)[0] + ".jpg"))
+                self.save_image_pro(psd.composite(), save_p)
                 count += 1
-            except Exception as e: print(e)
+            except: pass
         messagebox.showinfo("Report", f"Converted {count} files.")
 
     def _setup_resize_tab(self):
         ctk.CTkLabel(self.tab_resize, text="Smart Resizer", font=("Arial", 14, "bold")).pack(pady=5)
-        btn_frame = ctk.CTkFrame(self.tab_resize, fg_color="transparent")
-        btn_frame.pack(pady=5)
-        ctk.CTkButton(btn_frame, text="Select Files", command=lambda: self.select_files("img")).pack(side="left", padx=5)
-        
-        # RESET
-        ctk.CTkButton(btn_frame, text="Reset", fg_color="#C62828", hover_color="#B71C1C", width=80, command=self.reset_ui).pack(side="left", padx=5)
-        
+        f = ctk.CTkFrame(self.tab_resize, fg_color="transparent"); f.pack(pady=5)
+        ctk.CTkButton(f, text="Select Files", command=lambda: self.select_files("img")).pack(side="left", padx=5)
+        ctk.CTkButton(f, text="Reset", fg_color="#C62828", hover_color="#B71C1C", width=80, command=self.reset_ui).pack(side="left", padx=5)
         self.txt_res = ctk.CTkTextbox(self.tab_resize, height=100, state="disabled")
         self.txt_res.pack(pady=5, fill="x")
         self.res_var = ctk.StringVar(value="286x410")
@@ -400,69 +353,54 @@ class ProMediaTool(ctk.CTk, BaseClass):
         count = 0
         for f in self.file_list:
             try:
-                out_dir = os.path.join(os.path.dirname(f), "Resized_Output")
-                os.makedirs(out_dir, exist_ok=True)
+                out = os.path.join(os.path.dirname(f), "Resized_Output")
+                os.makedirs(out, exist_ok=True)
                 img = Image.open(f)
                 img = img.resize((w, h), Image.Resampling.LANCZOS)
-                out_path = os.path.join(out_dir, os.path.basename(os.path.splitext(f)[0] + f"_{self.res_var.get()}.jpg"))
-                self.save_image_pro(img, out_path, img.info.get('dpi', (72,72)))
+                save_p = os.path.join(out, os.path.basename(os.path.splitext(f)[0] + f"_{self.res_var.get()}.jpg"))
+                self.save_image_pro(img, save_p, img.info.get('dpi', (72,72)))
                 count += 1
             except: pass
         messagebox.showinfo("Success", f"Resized {count} files.")
 
     def _setup_banner_tab(self):
         ctk.CTkLabel(self.tab_banner, text="HD Banner & Batch Rename", font=("Arial", 14, "bold")).pack(pady=5)
-        
-        btn_frame = ctk.CTkFrame(self.tab_banner, fg_color="transparent")
-        btn_frame.pack(pady=5)
-        ctk.CTkButton(btn_frame, text="Select Files", command=lambda: self.select_files("img")).pack(side="left", padx=5)
-        
-        # RESET
-        ctk.CTkButton(btn_frame, text="Reset", fg_color="#C62828", hover_color="#B71C1C", width=80, command=self.reset_ui).pack(side="left", padx=5)
-        
+        f = ctk.CTkFrame(self.tab_banner, fg_color="transparent"); f.pack(pady=5)
+        ctk.CTkButton(f, text="Select Files", command=lambda: self.select_files("img")).pack(side="left", padx=5)
+        ctk.CTkButton(f, text="Reset", fg_color="#C62828", hover_color="#B71C1C", width=80, command=self.reset_ui).pack(side="left", padx=5)
         self.txt_ban = ctk.CTkTextbox(self.tab_banner, height=60, state="disabled")
         self.txt_ban.pack(pady=5, fill="x")
-        
         self.ban_type = ctk.StringVar(value="2day")
         r = ctk.CTkFrame(self.tab_banner); r.pack(pady=5)
         ctk.CTkRadioButton(r, text="2-Day Banner", variable=self.ban_type, value="2day", command=self.refresh_preview).pack(side="left", padx=10)
         ctk.CTkRadioButton(r, text="3-Day Banner", variable=self.ban_type, value="3day", command=self.refresh_preview).pack(side="left", padx=10)
-        
         ctk.CTkButton(self.tab_banner, text="Process Batch", fg_color="green", command=lambda: threading.Thread(target=self._process_ban, daemon=True).start()).pack(pady=10)
 
     def _process_ban(self):
         if not self.file_list: return messagebox.showwarning("Error", "No files selected")
         tpl = "banner_2day.png" if self.ban_type.get() == "2day" else "banner_3day.png"
-        tpl_path = self.resource_path(tpl)
-        if not os.path.exists(tpl_path): return messagebox.showerror("Error", f"Missing {tpl}")
+        if not os.path.exists(self.resource_path(tpl)): return messagebox.showerror("Error", f"Missing {tpl}")
         
         count = 0
-        for fpath in self.file_list:
+        for f in self.file_list:
             try:
-                out_dir = os.path.join(os.path.dirname(fpath), "Banner_Output")
-                os.makedirs(out_dir, exist_ok=True)
-                
-                # PROCESSING
-                img = Image.open(fpath)
+                out = os.path.join(os.path.dirname(f), "Banner_Output")
+                os.makedirs(out, exist_ok=True)
+                img = Image.open(f)
                 dpi = img.info.get('dpi', (72, 72))
-                img_res = img.resize((286, 371), Image.Resampling.LANCZOS)
-                img_res = img_res.filter(ImageFilter.UnsharpMask(radius=0.8, percent=110, threshold=3))
+                img = img.resize((286, 371), Image.Resampling.LANCZOS)
+                img = img.filter(ImageFilter.UnsharpMask(radius=0.8, percent=110, threshold=3))
                 
-                canvas = Image.new("RGB", (286, 410), (255, 255, 255))
-                canvas.paste(img_res, (0, 0))
-                banner = Image.open(tpl_path).convert("RGBA").resize((286, 410), Image.Resampling.LANCZOS)
-                canvas.paste(banner, (0, 0), mask=banner)
+                can = Image.new("RGB", (286, 410), (255, 255, 255))
+                can.paste(img, (0,0))
+                ovl = Image.open(self.resource_path(tpl)).convert("RGBA").resize((286, 410), Image.Resampling.LANCZOS)
+                can.paste(ovl, (0,0), mask=ovl)
                 
-                # RETRIEVE CUSTOM NAME
-                base_name = self.custom_names_map.get(fpath, os.path.splitext(os.path.basename(fpath))[0])
-                
-                # Define Suffix
-                suffix = "2DayBanner_286x410" if self.ban_type.get() == "2day" else "3DayBanner_286x410"
-                fname = f"{base_name}_{suffix}.jpg"
-                    
-                self.save_image_pro(canvas, os.path.join(out_dir, fname), dpi)
+                base = self.custom_names_map.get(f, os.path.splitext(os.path.basename(f))[0])
+                suf = "2DayBanner_286x410" if self.ban_type.get() == "2day" else "3DayBanner_286x410"
+                self.save_image_pro(can, os.path.join(out, f"{base}_{suf}.jpg"), dpi)
                 count += 1
-            except Exception as e: print(e)
+            except: pass
         messagebox.showinfo("Success", f"Processed {count} files.")
 
     def _reveal_author(self, event=None):
