@@ -2,7 +2,7 @@
 APPLICATION SECURITY MANIFEST & AUDIT LOG
 -----------------------------------------
 App Name:       Media Workflow Studio Pro
-Version:        5.4 (Layout Overhaul & Forced Reset)
+Version:        5.5 (Force Wake-Up Fix)
 Author:         Ayush Singhal
 Company:        Deluxe Media
 Purpose:        Local image manipulation.
@@ -40,15 +40,15 @@ class ProMediaTool(ctk.CTk, BaseClass):
     def __init__(self):
         super().__init__()
 
-        self.title("Media Workflow Studio Pro v5.4")
+        self.title("Media Workflow Studio Pro v5.5")
         self.geometry("1100x750")
         self.minsize(1100, 750)
         
         self.bind("<Control-Alt-a>", self._reveal_author)
         
         # --- Layout Grid ---
-        self.grid_columnconfigure(0, weight=4) # Left Panel (Controls + Rename)
-        self.grid_columnconfigure(1, weight=5) # Right Panel (Preview + Info)
+        self.grid_columnconfigure(0, weight=4) # Left Panel
+        self.grid_columnconfigure(1, weight=5) # Right Panel
         self.grid_rowconfigure(0, weight=1)
 
         # ============================================================
@@ -65,7 +65,7 @@ class ProMediaTool(ctk.CTk, BaseClass):
         self.tab_resize = self.tab_view.add("Smart Resizer")
         self.tab_banner = self.tab_view.add("HD Banner & Rename")
 
-        # 2. Rename Section (Moved to Left)
+        # 2. Rename Section (Left Side)
         self.rename_frame = ctk.CTkFrame(self.left_frame, fg_color="#2b2b2b", border_color="gray", border_width=1)
         self.rename_frame.pack(fill="x", padx=10, pady=20, side="bottom")
 
@@ -134,81 +134,69 @@ class ProMediaTool(ctk.CTk, BaseClass):
         return os.path.join(base_path, relative_path)
 
     # ============================================================
-    # === FAIL-SAFE RESET ENGINE =================================
+    # === ROBUST RESET & LOAD LOGIC ==============================
     # ============================================================
     def reset_ui(self):
-        """
-        FAIL-SAFE RESET:
-        1. Explicitly enables widgets first.
-        2. Clears content.
-        3. Re-disables/Locks widgets.
-        """
+        """Completely clears and disables UI for safety."""
         try:
-            # 1. Reset Internal State
             self.file_list = []
             self.file_names = []
             self.custom_names_map = {}
             self.current_preview_path = None
             self.current_ctk_image = None
-            
-            # 2. Reset Selector
-            self.preview_selector.configure(state="normal") 
+
+            # 1. Selector Reset
+            self.preview_selector.configure(state="normal")
             self.preview_selector.set("No Files Selected")
             self.preview_selector.configure(values=["No Files Selected"])
             self.preview_selector.configure(state="disabled")
 
-            # 3. Reset Visuals
+            # 2. Visuals Reset
             self.lbl_preview_img.configure(image=None, text="[Drag Files Here]")
             self.lbl_rename_target.configure(text="No file selected")
-            
             self.entry_manual_name.delete(0, "end")
             self.lbl_final_name.configure(text="Output: ...")
-            
-            # 4. Reset Info Box (Unlock -> Clear -> Lock)
+
+            # 3. Info Box Reset
             self.info_box.configure(state="normal")
             self.info_box.delete("0.0", "end")
             self.info_box.insert("0.0", "Waiting for input...")
             self.info_box.configure(state="disabled")
-            
-            # 5. Reset Tab Text Boxes
+
+            # 4. Text Boxes Reset
             for txt in [self.txt_psd, self.txt_res, self.txt_ban]:
-                txt.configure(state="normal") # CRITICAL: Enable before clearing
+                txt.configure(state="normal")
                 txt.delete("0.0", "end")
                 txt.configure(state="disabled")
-                
-            self.update() # Force UI Redraw
-            
+
+            self.update_idletasks()
         except Exception as e:
-            print(f"Reset Exception: {e}")
+            print(f"Reset Error: {e}")
 
     def on_tab_switch(self):
         self.reset_ui()
 
-    # ============================================================
-    # === INPUT HANDLING =========================================
-    # ============================================================
     def handle_files_input(self, files):
         if not files: return
         
-        # 1. Reset UI to clean state
+        # 1. Clear existing data
         self.reset_ui()
         
         # 2. Load New Data
         self.file_list = list(files)
         self.file_names = [os.path.basename(f) for f in files]
         
-        # 3. Initialize Map
         self.custom_names_map = {}
         for f in files:
             base = os.path.splitext(os.path.basename(f))[0]
             self.custom_names_map[f] = base
 
-        # 4. Activate Selector
+        # 3. Enable UI Elements (Force Wake Up)
         self.preview_selector.configure(state="normal")
         self.preview_selector.configure(values=self.file_names)
         self.preview_selector.set(self.file_names[0])
         
-        # 5. Populate Active Text Box
+        # 4. Populate List
         active = self.tab_view.get()
         target_box = self.txt_psd if active == "PSD Bulk Converter" else (self.txt_res if active == "Smart Resizer" else self.txt_ban)
         
@@ -217,26 +205,30 @@ class ProMediaTool(ctk.CTk, BaseClass):
         for f in self.file_names: target_box.insert("end", f"{f}\n")
         target_box.configure(state="disabled")
 
-        # 6. Load First Item
-        self.current_preview_path = self.file_list[0]
-        
-        self.update_rename_fields() 
-        self.update_preview_logic()
-        self.update_file_info(self.current_preview_path)
+        # 5. TRIGGER FIRST PREVIEW MANUALLY
+        # We simulate a click on the first item to force the preview engine to run
+        first_file = self.file_names[0]
+        self.on_selector_change(first_file)
 
     def on_selector_change(self, selected_filename):
+        """Main Trigger for Preview & Info Updates"""
         if selected_filename == "No Files Selected" or not self.file_list: return
+        
         try:
+            # Find the full path
             index = self.file_names.index(selected_filename)
             self.current_preview_path = self.file_list[index]
             
-            self.update_rename_fields() 
+            # Execute updates in sequence
+            self.update_rename_fields()
             self.update_preview_logic()
             self.update_file_info(self.current_preview_path)
-        except ValueError: pass
+            
+        except Exception as e:
+            print(f"Selector Error: {e}")
 
     # ============================================================
-    # === FILE INFO & PREVIEW ENGINE =============================
+    # === PREVIEW & INFO ENGINE ==================================
     # ============================================================
     def update_file_info(self, filepath):
         if not filepath: return
@@ -249,7 +241,7 @@ class ProMediaTool(ctk.CTk, BaseClass):
             if filepath.lower().endswith(".psd"):
                 psd = PSDImage.open(filepath)
                 w, h = psd.width, psd.height
-                fmt = "PSD (Adobe)"
+                fmt = "PSD"
                 mode = psd.color_mode
             else:
                 img = Image.open(filepath)
@@ -263,8 +255,9 @@ class ProMediaTool(ctk.CTk, BaseClass):
                    f"File Size: {size_str}")
 
         except Exception as e:
-            txt = f"Could not read file info.\n{e}"
+            txt = f"Could not read info: {e}"
 
+        # Unlock -> Update -> Lock
         self.info_box.configure(state="normal")
         self.info_box.delete("0.0", "end")
         self.info_box.insert("0.0", txt)
@@ -273,27 +266,13 @@ class ProMediaTool(ctk.CTk, BaseClass):
     def update_rename_fields(self):
         if not self.current_preview_path: return
         try:
-            # Set Label to Current File
             self.lbl_rename_target.configure(text=f"Editing: {os.path.basename(self.current_preview_path)}")
-            
             stored_name = self.custom_names_map.get(self.current_preview_path, "")
+            
             self.entry_manual_name.delete(0, "end")
             self.entry_manual_name.insert(0, stored_name)
             self._update_suffix_label(stored_name)
         except: pass
-
-    def on_manual_rename_type(self, event):
-        if not self.current_preview_path: return
-        new_name = self.entry_manual_name.get()
-        self.custom_names_map[self.current_preview_path] = new_name
-        self._update_suffix_label(new_name)
-
-    def _update_suffix_label(self, name):
-        if self.tab_view.get() == "HD Banner & Rename":
-            suffix = "2DayBanner_286x410" if self.ban_type.get() == "2day" else "3DayBanner_286x410"
-            self.lbl_final_name.configure(text=f"Output: {name}_{suffix}.jpg")
-        else:
-            self.lbl_final_name.configure(text=f"Output: {name}.jpg")
 
     def update_preview_logic(self):
         if not self.current_preview_path: return
@@ -304,7 +283,6 @@ class ProMediaTool(ctk.CTk, BaseClass):
             else:
                 img = Image.open(self.current_preview_path)
 
-            # Apply Banner Overlay if on Banner Tab
             if self.tab_view.get() == "HD Banner & Rename":
                 img = img.resize((286, 371), Image.Resampling.LANCZOS)
                 canvas = Image.new("RGB", (286, 410), (255, 255, 255))
@@ -325,7 +303,20 @@ class ProMediaTool(ctk.CTk, BaseClass):
             self.lbl_preview_img.configure(image=self.current_ctk_image, text="")
             
         except Exception as e:
-            self.lbl_preview_img.configure(image=None, text=f"Preview Failed\n{str(e)}")
+            self.lbl_preview_img.configure(image=None, text=f"Preview Error\n{str(e)}")
+
+    def on_manual_rename_type(self, event):
+        if not self.current_preview_path: return
+        new_name = self.entry_manual_name.get()
+        self.custom_names_map[self.current_preview_path] = new_name
+        self._update_suffix_label(new_name)
+
+    def _update_suffix_label(self, name):
+        if self.tab_view.get() == "HD Banner & Rename":
+            suffix = "2DayBanner_286x410" if self.ban_type.get() == "2day" else "3DayBanner_286x410"
+            self.lbl_final_name.configure(text=f"Output: {name}_{suffix}.jpg")
+        else:
+            self.lbl_final_name.configure(text=f"Output: {name}.jpg")
 
     def refresh_preview(self):
         self.update_preview_logic()
@@ -334,9 +325,7 @@ class ProMediaTool(ctk.CTk, BaseClass):
         if img.mode in ("RGBA", "P", "CMYK"): img = img.convert("RGB")
         img.save(path, "JPEG", quality=100, subsampling=0, dpi=dpi)
 
-    # ============================================================
-    # === TABS & PROCESSING ======================================
-    # ============================================================
+    # --- DRAG & DROP / FILE SELECT ---
     def drop_files_handler(self, event):
         raw_files = event.data
         if "{" in raw_files:
@@ -351,6 +340,7 @@ class ProMediaTool(ctk.CTk, BaseClass):
         files = filedialog.askopenfilenames(filetypes=ft)
         if files: self.handle_files_input(files)
 
+    # --- TABS ---
     def _setup_psd_tab(self):
         ctk.CTkLabel(self.tab_psd, text="PSD Bulk Converter", font=("Arial", 14, "bold")).pack(pady=5)
         btn_frame = ctk.CTkFrame(self.tab_psd, fg_color="transparent")
