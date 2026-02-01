@@ -13,7 +13,7 @@ from psd_tools import PSDImage
 
 # --- CONFIGURATION ---
 ASSET_DIR = os.path.dirname(os.path.abspath(__file__))
-VERSION = "v15"
+VERSION = "v15.0"
 COPYRIGHT_OWNER = "Ayush Singhal" 
 YEAR = "2026"
 
@@ -28,7 +28,7 @@ class BatchProcessor(QThread):
         self.mode = mode
         self.file_list = file_list
         self.settings = settings
-        self.rename_map = rename_map if rename_map else {} # Dictionary of {filepath: custom_name}
+        self.rename_map = rename_map if rename_map else {} 
         self._is_running = True
 
     def run(self):
@@ -78,9 +78,8 @@ class BatchProcessor(QThread):
                     img = img.resize((w, h), Image.Resampling.LANCZOS)
                     final_name = f"{name_only}_{w}x{h}"
 
-                # --- BANNER LOGIC (v16.0 Per-File Rename) ---
+                # --- BANNER LOGIC (Per-File Rename) ---
                 elif self.mode == "banner":
-                    # Check if user provided a specific name for THIS file
                     user_custom_name = self.rename_map.get(f_path, "").strip()
                     
                     if user_custom_name:
@@ -178,7 +177,7 @@ class MediaStudioPro(QMainWindow):
         self.ghost_copy.activated.connect(self.show_ghost_copyright)
 
         self.files = []
-        self.file_renames = {} # v16.0: Dictionary to store per-file names
+        self.file_renames = {} 
         self.current_preview_path = None
 
         main_widget = QWidget()
@@ -263,7 +262,7 @@ class MediaStudioPro(QMainWindow):
         l2.addStretch(); btn2 = QPushButton("Process Resizing"); btn2.setObjectName("ActionBtn"); btn2.setFixedHeight(40)
         btn2.clicked.connect(lambda: self.start_batch("resize")); l2.addWidget(btn2); self.tabs.addTab(t2, "Resize")
 
-        # BANNER (RENAMING UI)
+        # BANNER
         t3 = QWidget(); l3 = QVBoxLayout(t3)
         self.rad_2day = QRadioButton("2-Day Banner"); self.rad_3day = QRadioButton("3-Day Banner"); self.rad_2day.setChecked(True)
         self.rad_2day.toggled.connect(self.refresh_preview)
@@ -274,7 +273,6 @@ class MediaStudioPro(QMainWindow):
         rnl = QVBoxLayout(rn_grp)
         self.entry_rename = QLineEdit()
         self.entry_rename.setPlaceholderText("Enter custom name for THIS file...")
-        # v16.0 Connect to new Save Logic
         self.entry_rename.textChanged.connect(self.save_current_rename)
         rnl.addWidget(self.entry_rename)
         l3.addWidget(rn_grp); l3.addStretch()
@@ -282,11 +280,17 @@ class MediaStudioPro(QMainWindow):
         btn3 = QPushButton("Generate Banners"); btn3.setObjectName("ActionBtn"); btn3.setFixedHeight(40)
         btn3.clicked.connect(lambda: self.start_batch("banner")); l3.addWidget(btn3); self.tabs.addTab(t3, "Banner")
 
+    # --- RESTORED FUNCTION ---
+    def open_file_dialog(self):
+        files, _ = QFileDialog.getOpenFileNames(self, "Select Images", "", "Images (*.jpg *.png *.psd)")
+        if files: self.load_files(files)
+    # -------------------------
+
     def load_files(self, paths):
         valid = [f for f in paths if os.path.isfile(f)]
         if not valid: return
         self.files = valid
-        self.file_renames = {} # Clear renames on new load
+        self.file_renames = {} 
         self.combo_files.blockSignals(True)
         self.combo_files.clear()
         self.combo_files.addItems([os.path.basename(f) for f in valid])
@@ -298,23 +302,19 @@ class MediaStudioPro(QMainWindow):
     def on_file_select(self, index):
         if self.files and index >= 0:
             self.current_preview_path = self.files[index]
-            
-            # v16.0: Load the saved name for this file (if any)
-            # We block signals so loading the text doesn't trigger 'textChanged' event
             self.entry_rename.blockSignals(True)
             saved_name = self.file_renames.get(self.current_preview_path, "")
             self.entry_rename.setText(saved_name)
             self.entry_rename.blockSignals(False)
-            
             self.refresh_preview()
 
+    def on_tab_changed(self):
+        # Optional: Reset preview when switching tabs if desired
+        pass
+
     def save_current_rename(self, text):
-        """ v16.0: Saves what user types into dictionary against current file path """
         if self.current_preview_path:
             self.file_renames[self.current_preview_path] = text
-            # We DON'T refresh preview here to avoid lag while typing, 
-            # unless you want to see the name update on a mock banner instantly.
-            # For now, we only update data.
 
     def refresh_preview(self):
         if not self.current_preview_path: return
@@ -351,9 +351,7 @@ class MediaStudioPro(QMainWindow):
         settings = {"res": self.combo_res.currentText(), "ban_type": "2day" if self.rad_2day.isChecked() else "3day", 
                     "custom_w": self.ecw.text(), "custom_h": self.ech.text()}
         
-        # v16.0 Pass the rename map to the worker
         self.worker = BatchProcessor(mode, self.files, settings, self.file_renames)
-        
         self.worker.progress_signal.connect(self.progress.setValue)
         self.worker.status_signal.connect(self.lbl_status.setText)
         self.worker.finished_signal.connect(lambda m: QMessageBox.information(self, "Success", m))
